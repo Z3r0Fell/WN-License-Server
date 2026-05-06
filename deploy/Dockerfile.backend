@@ -1,0 +1,28 @@
+# WatchNexus backend image
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+# System deps for cryptography + mongodump (used by backup script)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential libssl-dev curl gnupg ca-certificates tar \
+  && rm -rf /var/lib/apt/lists/*
+
+# Install MongoDB tools (mongodump) for in-container backups
+RUN curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc | gpg --dearmor -o /usr/share/keyrings/mongodb.gpg \
+  && echo "deb [signed-by=/usr/share/keyrings/mongodb.gpg] https://repo.mongodb.org/apt/debian bookworm/mongodb-org/7.0 main" > /etc/apt/sources.list.d/mongodb.list \
+  && apt-get update && apt-get install -y --no-install-recommends mongodb-database-tools \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY backend/requirements.txt ./requirements.txt
+RUN pip install -r requirements.txt
+
+COPY backend/ ./
+
+EXPOSE 8001
+
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "2"]

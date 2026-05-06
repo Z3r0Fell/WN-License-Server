@@ -1,0 +1,10 @@
+[Unit]
+Description=Renew TLS certificates twice daily
+
+[Timer]
+OnCalendar=*-*-* 02:30,14:30:00
+Persistent=true
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target

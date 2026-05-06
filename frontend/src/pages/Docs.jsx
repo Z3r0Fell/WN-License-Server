@@ -191,6 +191,7 @@ export default function Docs() {
               <li>POST <span className="text-emerald-400">/api/webhooks/lemonsqueezy</span> &nbsp; (header <code>X-Signature</code> = HMAC-SHA256 of body)</li>
               <li>POST <span className="text-emerald-400">/api/webhooks/paddle</span> &nbsp; (header <code>Paddle-Signature: ts=...;h1=...</code>)</li>
               <li>POST <span className="text-emerald-400">/api/webhooks/gumroad</span> &nbsp; (header <code>X-Gumroad-Signature</code> = HMAC-SHA256 of body)</li>
+              <li>POST <span className="text-emerald-400">/api/webhooks/stripe</span> &nbsp; (header <code>Stripe-Signature: t=...,v1=...</code>)</li>
             </ul>
           </section>
 
@@ -204,9 +205,18 @@ export default function Docs() {
 
           <section id="rate">
             <h2 className="text-xl font-semibold mb-3">Rate limits</h2>
-            <p className="text-sm text-muted-foreground">
-              Default: <code className="font-mono">1000/min</code> per IP across all endpoints.
-              On <code className="font-mono">429</code>, back off and retry; tokens within grace stay valid in the meantime.
+            <p className="text-sm text-muted-foreground">Per-IP, sliding window:</p>
+            <ul className="mt-2 space-y-1 text-sm font-mono">
+              <li><span className="text-emerald-400">/admin/login</span> &nbsp; 10/min</li>
+              <li><span className="text-emerald-400">/customer/login</span> &nbsp; 15/min</li>
+              <li><span className="text-emerald-400">/customer/register</span> &nbsp; 5/min</li>
+              <li><span className="text-emerald-400">/integrate/activate</span> &nbsp; 60/min</li>
+              <li><span className="text-emerald-400">/integrate/validate</span> &nbsp; 600/min (heartbeats)</li>
+              <li><span className="text-emerald-400">/integrate/deactivate</span> &nbsp; 30/min</li>
+              <li><span className="text-emerald-400">/webhooks/*</span> &nbsp; 300/min</li>
+            </ul>
+            <p className="text-sm text-muted-foreground mt-2">
+              On <code className="font-mono">429</code>, back off and retry; tokens within grace stay valid in the meantime. Use the <code className="font-mono">Retry-After</code> header.
             </p>
           </section>
         </article>

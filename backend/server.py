@@ -2,14 +2,13 @@
 import logging
 import os
 import sys
+import time
+from collections import defaultdict, deque
 from pathlib import Path
+from typing import Deque
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
-from slowapi import Limiter
-from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
-from slowapi.util import get_remote_address
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -33,32 +32,65 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("watchnexus")
 
-# ----- Rate limiting -----
-limiter = Limiter(
-    key_func=get_remote_address,
-    default_limits=["1000/minute"],
-    storage_uri="memory://",
-    strategy="moving-window",
-)
 
-app = FastAPI(title="WatchNexus Licensing Server", version="1.0.0")
-app.state.limiter = limiter
-app.add_middleware(SlowAPIMiddleware)
+# ---- Per-route rate limit buckets (sliding window in-memory) -----------------
+# Each rule: prefix -> (max_requests, window_seconds)
+RATE_RULES: list[tuple[str, int, int]] = [
+    ("/api/admin/login",            10, 60),    # brute-force protection
+    ("/api/customer/login",         15, 60),
+    ("/api/customer/register",      5,  60),
+    ("/api/integrate/activate",     60, 60),    # ~1/sec sustained
+    ("/api/integrate/validate",     600, 60),   # heartbeats are common
+    ("/api/integrate/deactivate",   30, 60),
+    ("/api/webhooks",               300, 60),   # bursts from providers
+]
 
-
-@app.exception_handler(RateLimitExceeded)
-async def ratelimit_handler(request: Request, exc: RateLimitExceeded):
-    return JSONResponse(
-        {"error": "rate_limit_exceeded", "detail": str(exc.detail)},
-        status_code=429,
-    )
+_buckets: dict[tuple[str, str], Deque[float]] = defaultdict(deque)
 
 
-# Apply tighter rate limits to specific endpoints by path-prefix middleware
+def _client_ip(request: Request) -> str:
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    real = request.headers.get("x-real-ip")
+    if real:
+        return real.strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _matched_rule(path: str) -> tuple[int, int] | None:
+    for prefix, n, win in RATE_RULES:
+        if path.startswith(prefix):
+            return n, win
+    return None
+
+
+app = FastAPI(title="WatchNexus Licensing Server", version="1.1.0")
+
+
 @app.middleware("http")
-async def per_path_rate_limits(request: Request, call_next):
-    # The library applies default_limits globally; tighter per-route via decorator OR
-    # we can short-circuit here using its limit() helper. Keeping default global limit.
+async def rate_limit_middleware(request: Request, call_next):
+    rule = _matched_rule(request.url.path)
+    if rule:
+        max_req, window = rule
+        ip = _client_ip(request)
+        key = (request.url.path, ip)
+        now = time.monotonic()
+        bucket = _buckets[key]
+        # drop old
+        cutoff = now - window
+        while bucket and bucket[0] < cutoff:
+            bucket.popleft()
+        if len(bucket) >= max_req:
+            retry_after = max(1, int(window - (now - bucket[0])))
+            return JSONResponse(
+                {"error": "rate_limit_exceeded",
+                 "detail": f"Too many requests. Try again in {retry_after}s.",
+                 "limit": max_req, "window_seconds": window},
+                status_code=429,
+                headers={"Retry-After": str(retry_after)},
+            )
+        bucket.append(now)
     return await call_next(request)
 
 
@@ -84,10 +116,8 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def on_startup():
-    # Pre-load RSA keys (creates them if missing)
     _load_rsa_keys()
-    # Seed admin user
-    seed_email = os.environ.get("SEED_ADMIN_EMAIL", "admin@watchnexus.local").lower()
+    seed_email = os.environ.get("SEED_ADMIN_EMAIL", "admin@watchnexus.app").lower()
     seed_pw = os.environ.get("SEED_ADMIN_PASSWORD", "admin12345")
     existing = await db.admin_users.find_one({"email": seed_email})
     if not existing:
@@ -100,7 +130,6 @@ async def on_startup():
             "created_at": now_iso(),
         })
         logger.info(f"Seeded admin user: {seed_email}")
-    # Seed example product if none exist
     if await db.products.count_documents({}) == 0:
         import uuid
         pid = str(uuid.uuid4())
@@ -116,7 +145,6 @@ async def on_startup():
             "updated_at": now_iso(),
         })
         logger.info("Seeded default product 'watchnexus-pro'")
-    # Useful indexes
     await db.licenses.create_index("key", unique=True)
     await db.licenses.create_index("customer_email")
     await db.licenses.create_index("product_id")

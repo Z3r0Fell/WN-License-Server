@@ -171,6 +171,24 @@ async def _create_license(product_id: str, customer_email: Optional[str],
         "updated_at": now_iso(),
     }
     await db.licenses.insert_one(doc)
+    # Send purchase email if a customer email is set
+    if customer_email:
+        try:
+            from email_sender import render_purchase_email, send_email
+            portal_url = os.environ.get("APP_PUBLIC_URL", "").rstrip("/") + "/portal"
+            subject, html = render_purchase_email(
+                customer_email=customer_email,
+                license_key=key,
+                product_name=product.get("name") or product["slug"],
+                plan=plan,
+                seats=seats,
+                source=source,
+                portal_url=portal_url,
+            )
+            send_email(customer_email, subject, html)
+        except Exception:
+            import logging
+            logging.getLogger("watchnexus").exception("admin license email failed")
     return doc
 
 
@@ -333,6 +351,12 @@ class ApiKeyIn(BaseModel):
     name: str
     product_id: Optional[str] = None
     scopes: list[str] = Field(default_factory=lambda: ["activate", "validate", "deactivate"])
+    allowed_ips: list[str] = Field(default_factory=list)
+
+
+class ApiKeyUpdate(BaseModel):
+    name: Optional[str] = None
+    allowed_ips: Optional[list[str]] = None
 
 
 @router.get("/api-keys")
@@ -354,16 +378,35 @@ async def api_keys_create(body: ApiKeyIn, admin=Depends(get_current_admin)):
         "name": body.name,
         "product_id": body.product_id,
         "scopes": body.scopes,
+        "allowed_ips": body.allowed_ips or [],
         "key": raw,
         "status": "active",
         "created_at": now_iso(),
         "last_used_at": None,
+        "last_used_ip": None,
     }
     await db.api_keys.insert_one(doc)
     await audit_log("admin", admin["id"], admin["email"], "api_key.create",
                     "api_key", doc["id"], severity="warning")
     return {"id": doc["id"], "name": doc["name"], "key": raw, "created_at": doc["created_at"],
-            "product_id": doc["product_id"], "scopes": doc["scopes"], "status": doc["status"]}
+            "product_id": doc["product_id"], "scopes": doc["scopes"], "status": doc["status"],
+            "allowed_ips": doc["allowed_ips"]}
+
+
+@router.patch("/api-keys/{kid}")
+async def api_keys_update(kid: str, body: ApiKeyUpdate, admin=Depends(get_current_admin)):
+    payload = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
+    if not payload:
+        raise HTTPException(400, "No fields to update")
+    res = await db.api_keys.find_one_and_update(
+        {"id": kid}, {"$set": payload}, return_document=True,
+        projection={"_id": 0, "key": 0},
+    )
+    if not res:
+        raise HTTPException(404, "Not found")
+    await audit_log("admin", admin["id"], admin["email"], "api_key.update",
+                    "api_key", kid, meta=payload)
+    return serialize_doc(res)
 
 
 @router.post("/api-keys/{kid}/revoke")

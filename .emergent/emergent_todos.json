@@ -1,30 +1,30 @@
 [
   {
-    "content": "Phase 1: POC complete (HMAC+RSA license, activation token w/ grace, webhook signatures)",
+    "content": "Phase 3: Email delivery module (SendGrid HTTP + SMTP fallback) + purchase confirmation hooks",
     "status": "completed"
   },
   {
-    "content": "Phase 2: Get design guidelines from design_agent",
+    "content": "Phase 3: Stripe webhook handler + signature verification + admin UI provider tag",
     "status": "completed"
   },
   {
-    "content": "Phase 2: Backend implementation (models, auth, integrator, webhooks, admin, customer)",
+    "content": "Phase 3: Tighten per-route rate limits + per-API-key IP allowlist",
     "status": "completed"
   },
   {
-    "content": "Phase 2: Frontend implementation (landing, admin panel, customer portal, docs)",
+    "content": "Phase 3: Admin UI for editing API key IP allowlists",
     "status": "completed"
   },
   {
-    "content": "Phase 2: Integration docs + ops scripts (backup script, rate limiting verified)",
+    "content": "Phase 3: Deploy package (Docker Compose, nginx, certbot, systemd backup timer)",
     "status": "completed"
   },
   {
-    "content": "Phase 2: All user stories covered + End-to-End testing via testing_agent_v3",
+    "content": "Phase 3: DEPLOY.md - super simple step-by-step VPS guide",
     "status": "completed"
   },
   {
-    "content": "Phase 2: Fix all bugs found in testing",
-    "status": "completed"
+    "content": "Phase 3: Test new features via testing_agent_v3",
+    "status": "in_progress"
   }
 ]

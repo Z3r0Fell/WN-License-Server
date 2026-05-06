@@ -1,0 +1,10 @@
+[Unit]
+Description=Renew Let's Encrypt certificates for WatchNexus
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/watchnexus/deploy
+ExecStart=/usr/bin/docker compose run --rm certbot certbot renew --webroot -w /var/www/certbot --non-interactive
+ExecStartPost=/usr/bin/docker compose exec nginx nginx -s reload
+StandardOutput=append:/var/log/watchnexus_certbot.log
+StandardError=append:/var/log/watchnexus_certbot.log

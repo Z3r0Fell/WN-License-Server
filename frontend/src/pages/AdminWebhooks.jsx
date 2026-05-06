@@ -12,6 +12,7 @@ function ProviderTag({ p }) {
     lemonsqueezy: { color: 'bg-yellow-500/15 text-yellow-300 border-yellow-500/20', label: 'Lemon Squeezy' },
     paddle: { color: 'bg-sky-500/15 text-sky-300 border-sky-500/20', label: 'Paddle' },
     gumroad: { color: 'bg-pink-500/15 text-pink-300 border-pink-500/20', label: 'Gumroad' },
+    stripe: { color: 'bg-violet-500/15 text-violet-300 border-violet-500/20', label: 'Stripe' },
   };
   const m = map[p] || { color: 'bg-muted text-muted-foreground border-border', label: p };
   return <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium ${m.color}`}>{m.label}</span>;
@@ -34,15 +35,16 @@ export default function AdminWebhooks() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Webhook events</h1>
-          <p className="text-sm text-muted-foreground mt-1">All deliveries from Lemon Squeezy, Paddle and Gumroad. Signature-verified, idempotent.</p>
+          <p className="text-sm text-muted-foreground mt-1">All deliveries from Lemon Squeezy, Paddle, Gumroad, and Stripe. Signature-verified, idempotent.</p>
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
         {[
           { p: 'lemonsqueezy', path: '/api/webhooks/lemonsqueezy', hdr: 'X-Signature' },
           { p: 'paddle', path: '/api/webhooks/paddle', hdr: 'Paddle-Signature' },
           { p: 'gumroad', path: '/api/webhooks/gumroad', hdr: 'X-Gumroad-Signature' },
+          { p: 'stripe', path: '/api/webhooks/stripe', hdr: 'Stripe-Signature' },
         ].map((c) => (
           <div key={c.p} className="rounded-xl border border-border bg-card p-4" data-testid={`webhook-endpoint-card-${c.p}`}>
             <div className="flex items-center justify-between"><ProviderTag p={c.p} /><Webhook className="h-3.5 w-3.5 text-muted-foreground" /></div>

@@ -1,0 +1,78 @@
+# WatchNexus production stack
+# Usage:
+#   1) cp .env.example .env  (and edit values)
+#   2) docker compose up -d --build
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+      - ./backups:/backups
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    networks: [internal]
+
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      DB_NAME: ${DB_NAME:-watchnexus}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+    volumes:
+      - rsa_keys:/app/keys
+      - ./backups:/backups
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks: [internal]
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.frontend
+      args:
+        # Empty string => same-origin API. Override only if frontend is on a
+        # different host than the backend.
+        REACT_APP_BACKEND_URL: ""
+    restart: unless-stopped
+    depends_on: [backend]
+    networks: [internal]
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/edge.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - certbot_webroot:/var/www/certbot
+    depends_on: [web, backend]
+    networks: [internal]
+
+  certbot:
+    image: certbot/certbot:latest
+    profiles: ["certbot"]   # only runs when explicitly requested
+    volumes:
+      - /etc/letsencrypt:/etc/letsencrypt
+      - certbot_webroot:/var/www/certbot
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["certbot certonly --webroot -w /var/www/certbot --non-interactive --agree-tos -m ${LETSENCRYPT_EMAIL} -d ${DOMAIN}"]
+
+volumes:
+  mongo_data:
+  rsa_keys:
+  certbot_webroot:
+
+networks:
+  internal:
+    driver: bridge

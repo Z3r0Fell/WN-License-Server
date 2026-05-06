@@ -81,14 +81,36 @@ async def get_current_customer(
 
 
 async def get_api_key(request: Request) -> dict:
-    """Server-to-server API key auth for /integrate/*. Header: X-API-Key."""
+    """Server-to-server API key auth for /integrate/*. Header: X-API-Key.
+    Enforces per-key IP allowlist (CIDR aware)."""
     raw = request.headers.get("x-api-key") or request.headers.get("X-API-Key")
     if not raw:
         raise HTTPException(status_code=401, detail="Missing X-API-Key")
     rec = await db.api_keys.find_one({"key": raw, "status": "active"}, {"_id": 0})
     if not rec:
         raise HTTPException(status_code=401, detail="Invalid API key")
+    # IP allowlist
+    from webhooks_sig import ip_in_allowlist
+    client_ip = _client_ip(request)
+    allowlist = rec.get("allowed_ips") or []
+    if allowlist and not ip_in_allowlist(client_ip, allowlist):
+        raise HTTPException(status_code=403,
+                            detail=f"IP {client_ip} not allowed for this API key")
     # update last_used (fire and forget)
     from db import now_iso
-    await db.api_keys.update_one({"id": rec["id"]}, {"$set": {"last_used_at": now_iso()}})
+    await db.api_keys.update_one({"id": rec["id"]},
+                                 {"$set": {"last_used_at": now_iso(),
+                                           "last_used_ip": client_ip}})
     return serialize_doc(rec)
+
+
+def _client_ip(request: Request) -> str | None:
+    """Return the real client IP, honoring common proxy headers."""
+    # X-Forwarded-For: client, proxy1, proxy2 -> take the first
+    xff = request.headers.get("x-forwarded-for") or request.headers.get("X-Forwarded-For")
+    if xff:
+        return xff.split(",")[0].strip()
+    real = request.headers.get("x-real-ip") or request.headers.get("X-Real-IP")
+    if real:
+        return real.strip()
+    return request.client.host if request.client else None
