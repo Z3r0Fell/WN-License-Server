@@ -21,10 +21,10 @@
   },
   {
     "content": "Phase 2: All user stories covered + End-to-End testing via testing_agent_v3",
-    "status": "in_progress"
+    "status": "completed"
   },
   {
     "content": "Phase 2: Fix all bugs found in testing",
-    "status": "pending"
+    "status": "completed"
   }
 ]

@@ -109,12 +109,18 @@
 3. Backup script: `scripts/backup_mongo.sh` using `mongodump` + retention; cron example.
 4. Minimal monitoring: health endpoint checks + log rotation.
 
-## 3) Next Actions
-1. Implement `poc/test_core.py` + fixtures and lock the license/token formats.
-2. Capture webhook verification notes for each provider and add to `poc/README.md`.
-3. After POC passes, scaffold FastAPI project and port POC crypto code into `services/`.
-4. Build MVP endpoints for integrator activate/validate + product/license CRUD.
-5. Add React admin + customer portal MVP pages and run 1 E2E test pass.
+## 3) Status (post-Phase 2)
+- POC: passed (HMAC+RSA license, activation+grace, webhook signatures for LS/Paddle/Gumroad).
+- Backend: implemented and live at `/api/*` with admin, customer, integrate, webhooks routers; rate limited; audit logged; daily mongodump backup script at `backend/scripts/backup_mongo.sh`.
+- Frontend: Landing, Docs, Admin (login, dashboard, products, licenses + drawer + bulk import, api-keys reveal-once, builds, webhooks, audit, customers) and Customer portal (login, register, licenses cards + deactivate, downloads).
+- Tests: 36/37 backend + 100% frontend flows passing (testing_agent_v3 iteration 1).
+
+## Next Actions (future phases on demand)
+1. Email delivery on purchase (SendGrid/SMTP) when user opts in.
+2. Stripe webhook receiver (currently Lemon Squeezy/Paddle/Gumroad only).
+3. Per-route rate limiting tuning + IP allowlists.
+4. Deployment artifacts: Docker Compose, nginx + TLS, systemd service, cron for backup.
+5. Magic-link customer login.
 
 ## 4) Success Criteria
 - POC script passes: HMAC+RSA license verification, activation token issuance, validate with grace, and webhook signature verification.
