@@ -1,0 +1,34 @@
+[
+  {
+    "content": "Phase 1: Build combined POC test_core.py (HMAC+RSA license, activation token w/ grace, webhook signatures)",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 1: Run POC and fix until all tests pass",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 2: Get design guidelines from design_agent",
+    "status": "in_progress"
+  },
+  {
+    "content": "Phase 2: Backend implementation (models, auth, integrator, webhooks, admin, customer)",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 2: Frontend implementation (landing, admin panel, customer portal, docs)",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 2: Integration docs + ops scripts (backup script, rate limiting verified)",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 2: All user stories covered + End-to-End testing via testing_agent_v3",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 2: Fix all bugs found in testing",
+    "status": "pending"
+  }
+]
