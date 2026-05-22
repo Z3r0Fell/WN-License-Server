@@ -74,7 +74,7 @@ INSTALL_DIR="/opt/watchnexus"
 DEPLOY_DIR="$INSTALL_DIR/deploy"
 
 if [[ -z "$SOURCE_DIR" ]]; then
-  SOURCE_DIR="$(cd "$(dirname "$0")/.. " 2>/dev/null && pwd || pwd)"
+  SOURCE_DIR="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd || pwd)"
 fi
 
 banner "WatchNexus installer"

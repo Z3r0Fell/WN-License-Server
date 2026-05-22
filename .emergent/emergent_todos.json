@@ -1,30 +1,26 @@
 [
   {
-    "content": "Phase 6: Backend runtime settings store (Mongo-backed, env-fallback) + /admin/settings endpoints",
+    "content": "Write static dual-domain edge.conf.template for Nginx",
+    "status": "completed"
+  },
+  {
+    "content": "Replace deploy/nginx/edge.conf with dual-domain version (placeholders __ADMIN_DOMAIN__/__CUSTOMER_DOMAIN__)",
+    "status": "completed"
+  },
+  {
+    "content": "Sanity-check install.sh (fix SOURCE_DIR space bug, ensure idempotency)",
+    "status": "completed"
+  },
+  {
+    "content": "Rewrite /app/DEPLOY.md for dual-domain installer-first flow",
+    "status": "completed"
+  },
+  {
+    "content": "Run testing_agent_v3 on backend + frontend for Phase 6 regressions",
     "status": "in_progress"
   },
   {
-    "content": "Phase 6: Re-wire webhooks + email sender to read from runtime settings",
-    "status": "pending"
-  },
-  {
-    "content": "Phase 6: Frontend /admin/settings page (webhooks, email, branding/URLs)",
-    "status": "pending"
-  },
-  {
-    "content": "Phase 6: Customer portal subdomain - URL config + frontend hostname-aware routing",
-    "status": "pending"
-  },
-  {
-    "content": "Phase 6: One-command Ubuntu installer (install.sh) - prereqs, certs, autostart, dual-domain nginx",
-    "status": "pending"
-  },
-  {
-    "content": "Phase 6: DEPLOY.md - DNS A-record walkthrough, dual-domain instructions",
-    "status": "pending"
-  },
-  {
-    "content": "Phase 6: Verify with testing_agent_v3",
+    "content": "Update plan.md to mark Phase 6 as COMPLETED",
     "status": "pending"
   }
 ]
