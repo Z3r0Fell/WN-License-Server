@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from pydantic import BaseModel, EmailStr, Field
 
 from auth import (get_current_admin, hash_password, verify_password,
-                  issue_session_token)
+                  require_admin_role, issue_session_token)
 from audit import log as audit_log
 from crypto_core import (generate_hmac_license, generate_rsa_license,
                          get_rsa_public_pem)
@@ -32,15 +32,34 @@ async def admin_login(body: AdminLoginIn, request: Request):
     user = await db.admin_users.find_one({"email": body.email.lower()}, {"_id": 0})
     if not user or not verify_password(body.password, user["password_hash"]):
         raise HTTPException(401, "Invalid credentials")
+    if user.get("is_active") is False:
+        raise HTTPException(403, "Account disabled")
     token = issue_session_token(user["id"], "admin", user["email"])
+    await db.admin_users.update_one(
+        {"id": user["id"]}, {"$set": {"last_login_at": now_iso()}}
+    )
     await audit_log("admin", user["id"], user["email"], "admin.login",
                     severity="info", ip=request.client.host if request.client else None)
-    return {"token": token, "user": {"id": user["id"], "email": user["email"], "name": user.get("name")}}
+    return {
+        "token": token,
+        "user": {
+            "id": user["id"],
+            "email": user["email"],
+            "name": user.get("name"),
+            "admin_role": user.get("admin_role") or "admin",
+        },
+    }
 
 
 @router.get("/me")
 async def admin_me(admin=Depends(get_current_admin)):
-    return {"id": admin["id"], "email": admin["email"], "name": admin.get("name")}
+    return {
+        "id": admin["id"],
+        "email": admin["email"],
+        "name": admin.get("name"),
+        "admin_role": admin.get("admin_role") or "admin",
+        "is_active": admin.get("is_active", True),
+    }
 
 
 # -------------------- Dashboard --------------------
@@ -87,7 +106,7 @@ async def products_list(admin=Depends(get_current_admin)):
 
 
 @router.post("/products")
-async def products_create(body: ProductIn, request: Request, admin=Depends(get_current_admin)):
+async def products_create(body: ProductIn, request: Request, admin=Depends(require_admin_role("admin"))):
     existing = await db.products.find_one({"slug": body.slug})
     if existing:
         raise HTTPException(400, "Product slug already exists")
@@ -103,7 +122,7 @@ async def products_create(body: ProductIn, request: Request, admin=Depends(get_c
 
 
 @router.put("/products/{pid}")
-async def products_update(pid: str, body: ProductIn, admin=Depends(get_current_admin)):
+async def products_update(pid: str, body: ProductIn, admin=Depends(require_admin_role("admin"))):
     update = body.model_dump()
     update["updated_at"] = now_iso()
     res = await db.products.find_one_and_update(
@@ -117,7 +136,7 @@ async def products_update(pid: str, body: ProductIn, admin=Depends(get_current_a
 
 
 @router.delete("/products/{pid}")
-async def products_delete(pid: str, admin=Depends(get_current_admin)):
+async def products_delete(pid: str, admin=Depends(require_admin_role("admin"))):
     used = await db.licenses.count_documents({"product_id": pid})
     if used:
         raise HTTPException(400, f"Cannot delete: {used} licenses use this product")
@@ -221,7 +240,7 @@ async def licenses_list(admin=Depends(get_current_admin),
 
 
 @router.post("/licenses")
-async def licenses_create(body: LicenseIn, request: Request, admin=Depends(get_current_admin)):
+async def licenses_create(body: LicenseIn, request: Request, admin=Depends(require_admin_role("admin"))):
     doc = await _create_license(body.product_id, body.customer_email, body.plan,
                                 body.seats, body.expires_at, body.notes, source="admin")
     await audit_log("admin", admin["id"], admin["email"], "license.create",
@@ -253,7 +272,7 @@ class LicenseUpdate(BaseModel):
 
 
 @router.patch("/licenses/{lid}")
-async def license_update(lid: str, body: LicenseUpdate, admin=Depends(get_current_admin)):
+async def license_update(lid: str, body: LicenseUpdate, admin=Depends(require_admin_role("admin"))):
     payload = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
     if not payload:
         raise HTTPException(400, "No fields to update")
@@ -269,7 +288,7 @@ async def license_update(lid: str, body: LicenseUpdate, admin=Depends(get_curren
 
 
 @router.post("/licenses/{lid}/revoke")
-async def license_revoke(lid: str, admin=Depends(get_current_admin)):
+async def license_revoke(lid: str, admin=Depends(require_admin_role("admin"))):
     res = await db.licenses.update_one({"id": lid}, {"$set": {"status": "revoked", "updated_at": now_iso()}})
     if not res.matched_count:
         raise HTTPException(404, "Not found")
@@ -281,7 +300,7 @@ async def license_revoke(lid: str, admin=Depends(get_current_admin)):
 
 
 @router.post("/licenses/{lid}/extend")
-async def license_extend(lid: str, body: dict, admin=Depends(get_current_admin)):
+async def license_extend(lid: str, body: dict, admin=Depends(require_admin_role("admin"))):
     new_expiry = body.get("expires_at")
     if not new_expiry:
         raise HTTPException(400, "expires_at required (ISO timestamp)")
@@ -310,7 +329,7 @@ async def license_deactivate_install(lid: str, aid: str, admin=Depends(get_curre
 
 @router.post("/licenses/bulk-import")
 async def licenses_bulk_import(file: UploadFile = File(...),
-                                admin=Depends(get_current_admin)):
+                                admin=Depends(require_admin_role("admin"))):
     content = (await file.read()).decode("utf-8", errors="replace")
     reader = csv.DictReader(io.StringIO(content))
     results = []
@@ -374,7 +393,7 @@ async def api_keys_list(admin=Depends(get_current_admin)):
 
 
 @router.post("/api-keys")
-async def api_keys_create(body: ApiKeyIn, admin=Depends(get_current_admin)):
+async def api_keys_create(body: ApiKeyIn, admin=Depends(require_admin_role("admin"))):
     raw = "wnk_" + secrets.token_urlsafe(32)
     doc = {
         "id": str(uuid.uuid4()),
@@ -397,7 +416,7 @@ async def api_keys_create(body: ApiKeyIn, admin=Depends(get_current_admin)):
 
 
 @router.patch("/api-keys/{kid}")
-async def api_keys_update(kid: str, body: ApiKeyUpdate, admin=Depends(get_current_admin)):
+async def api_keys_update(kid: str, body: ApiKeyUpdate, admin=Depends(require_admin_role("admin"))):
     payload = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
     if not payload:
         raise HTTPException(400, "No fields to update")
@@ -413,7 +432,7 @@ async def api_keys_update(kid: str, body: ApiKeyUpdate, admin=Depends(get_curren
 
 
 @router.post("/api-keys/{kid}/revoke")
-async def api_keys_revoke(kid: str, admin=Depends(get_current_admin)):
+async def api_keys_revoke(kid: str, admin=Depends(require_admin_role("admin"))):
     res = await db.api_keys.update_one({"id": kid}, {"$set": {"status": "revoked"}})
     if not res.matched_count:
         raise HTTPException(404, "Not found")
@@ -436,7 +455,7 @@ async def builds_list(admin=Depends(get_current_admin)):
 
 
 @router.post("/builds")
-async def builds_create(body: BuildIn, admin=Depends(get_current_admin)):
+async def builds_create(body: BuildIn, admin=Depends(require_admin_role("admin"))):
     product = await db.products.find_one({"id": body.product_id}, {"_id": 0})
     if not product:
         raise HTTPException(400, "Invalid product_id")
@@ -450,7 +469,7 @@ async def builds_create(body: BuildIn, admin=Depends(get_current_admin)):
 
 
 @router.delete("/builds/{bid}")
-async def builds_delete(bid: str, admin=Depends(get_current_admin)):
+async def builds_delete(bid: str, admin=Depends(require_admin_role("admin"))):
     await db.builds.delete_one({"id": bid})
     await audit_log("admin", admin["id"], admin["email"], "build.delete", "build", bid)
     return {"ok": True}
@@ -503,7 +522,7 @@ class SettingsUpdate(BaseModel):
 
 @router.put("/settings")
 async def settings_update(body: SettingsUpdate, request: Request,
-                          admin=Depends(get_current_admin)):
+                          admin=Depends(require_admin_role("admin"))):
     """Bulk upsert. Unknown keys ignored. Pass empty string to clear a value.
     Returns the refreshed public view."""
     accepted = {k: (v or "") for k, v in body.values.items()
@@ -517,7 +536,7 @@ async def settings_update(body: SettingsUpdate, request: Request,
 
 
 @router.post("/settings/test-email")
-async def settings_test_email(body: dict, admin=Depends(get_current_admin)):
+async def settings_test_email(body: dict, admin=Depends(require_admin_role("admin"))):
     """Send a test email to verify SendGrid/SMTP configuration."""
     to = (body.get("to") or admin.get("email") or "").strip()
     if not to:

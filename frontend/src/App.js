@@ -16,6 +16,9 @@ import AdminBuilds from './pages/AdminBuilds';
 import AdminWebhooks from './pages/AdminWebhooks';
 import AdminAudit from './pages/AdminAudit';
 import AdminSettings from './pages/AdminSettings';
+import AdminUsers from './pages/AdminUsers';
+import AdminProfile from './pages/AdminProfile';
+import AdminAcceptInvite from './pages/AdminAcceptInvite';
 import PortalLogin from './pages/PortalLogin';
 import PortalRegister from './pages/PortalRegister';
 import PortalLayout from './components/PortalLayout';
@@ -55,6 +58,7 @@ function App() {
 
           {/* Admin */}
           <Route path="/admin/login" element={<AdminLogin />} />
+          <Route path="/admin/accept-invite" element={<AdminAcceptInvite />} />
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<AdminDashboard />} />
             <Route path="quickstart" element={<AdminQuickstart />} />
@@ -65,6 +69,8 @@ function App() {
             <Route path="builds" element={<AdminBuilds />} />
             <Route path="webhooks" element={<AdminWebhooks />} />
             <Route path="audit" element={<AdminAudit />} />
+            <Route path="users" element={<AdminUsers />} />
+            <Route path="profile" element={<AdminProfile />} />
             <Route path="settings" element={<AdminSettings />} />
           </Route>
 

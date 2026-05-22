@@ -23,6 +23,7 @@ from auth import hash_password
 from crypto_core import _load_rsa_keys
 from db import db, now_iso
 from routers import admin as admin_router
+from routers import admin_users as admin_users_router
 from routers import customer as customer_router
 from routers import integrate as integrate_router
 from routers import public as public_router
@@ -101,6 +102,8 @@ from fastapi import APIRouter
 api = APIRouter(prefix="/api")
 api.include_router(public_router.router)
 api.include_router(admin_router.router)
+api.include_router(admin_users_router.router)
+api.include_router(admin_users_router.public_router)
 api.include_router(quickstart_router.router)
 api.include_router(customer_router.router)
 api.include_router(integrate_router.router)
@@ -131,9 +134,22 @@ async def on_startup():
             "email": seed_email,
             "name": "Admin",
             "password_hash": hash_password(seed_pw),
+            "admin_role": "admin",
+            "is_active": True,
             "created_at": now_iso(),
+            "last_login_at": None,
         })
         logger.info(f"Seeded admin user: {seed_email}")
+
+    # Backfill role/is_active on any pre-existing admin docs that predate this field.
+    await db.admin_users.update_many(
+        {"admin_role": {"$exists": False}},
+        {"$set": {"admin_role": "admin"}},
+    )
+    await db.admin_users.update_many(
+        {"is_active": {"$exists": False}},
+        {"$set": {"is_active": True}},
+    )
     if await db.products.count_documents({}) == 0:
         import uuid
         pid = str(uuid.uuid4())
@@ -219,6 +235,8 @@ async def on_startup():
     await db.webhook_events.create_index([("provider", 1), ("provider_event_id", 1)])
     await db.customers.create_index("email", unique=True)
     await db.admin_users.create_index("email", unique=True)
+    await db.admin_invites.create_index("token", unique=True)
+    await db.admin_invites.create_index("email")
     logger.info("WatchNexus Licensing Server ready")
 
 

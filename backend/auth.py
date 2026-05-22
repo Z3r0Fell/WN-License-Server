@@ -63,7 +63,36 @@ async def get_current_admin(
     user = await db.admin_users.find_one({"id": claims["sub"]}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=401, detail="Admin not found")
+    # Block disabled accounts even if they still hold a valid JWT.
+    if user.get("is_active") is False:
+        raise HTTPException(status_code=403, detail="Account disabled")
+    # Ensure legacy users without a role still get the admin role for compatibility.
+    user.setdefault("admin_role", "admin")
     return serialize_doc(user)
+
+
+def require_admin_role(*allowed_roles: str):
+    """Dependency factory: gate an endpoint by admin_role.
+
+    Usage:
+        @router.post(..., dependencies=[Depends(require_admin_role("admin"))])
+
+    Or to receive the user object:
+        async def my_handler(admin=Depends(get_current_admin)):
+            require_admin_role("admin")(admin)
+    """
+    allowed = set(allowed_roles)
+
+    async def _dep(admin: dict = Depends(get_current_admin)) -> dict:
+        role = admin.get("admin_role") or "admin"
+        if role not in allowed:
+            raise HTTPException(
+                status_code=403,
+                detail=f"This action requires one of roles: {', '.join(sorted(allowed))}",
+            )
+        return admin
+
+    return _dep
 
 
 async def get_current_customer(

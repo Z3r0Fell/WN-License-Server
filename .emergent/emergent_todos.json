@@ -1,26 +1,46 @@
 [
   {
-    "content": "Write static dual-domain edge.conf.template for Nginx",
+    "content": "Backend: add role/is_active/last_login_at to admin_users + role-aware auth helpers",
     "status": "completed"
   },
   {
-    "content": "Replace deploy/nginx/edge.conf with dual-domain version (placeholders __ADMIN_DOMAIN__/__CUSTOMER_DOMAIN__)",
+    "content": "Backend: add /admin/me/change-password endpoint",
     "status": "completed"
   },
   {
-    "content": "Sanity-check install.sh (fix SOURCE_DIR space bug, ensure idempotency)",
+    "content": "Backend: add /admin/users CRUD (list/create/update/delete) with guards",
     "status": "completed"
   },
   {
-    "content": "Rewrite /app/DEPLOY.md for dual-domain installer-first flow",
+    "content": "Backend: add /admin/users/{id}/reset-password endpoint",
     "status": "completed"
   },
   {
-    "content": "Run testing_agent_v3 on backend + frontend for Phase 6 regressions",
+    "content": "Backend: add invite flow — create invite, accept invite (public), email via SendGrid",
     "status": "completed"
   },
   {
-    "content": "Update plan.md to mark Phase 6 as COMPLETED",
+    "content": "Backend: enforce role gating on destructive endpoints (Settings PUT, products/licenses CRUD, api-keys, etc.)",
     "status": "completed"
+  },
+  {
+    "content": "Frontend: AdminUsers page (list/create/edit/delete/reset/invite)",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: Change-my-password page/modal + role surfaced in topbar",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: AcceptInvite public route",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: hide admin-only actions when role===support",
+    "status": "completed"
+  },
+  {
+    "content": "Test with testing_agent_v3",
+    "status": "in_progress"
   }
 ]
