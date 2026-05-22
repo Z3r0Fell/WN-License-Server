@@ -1,26 +1,26 @@
 [
   {
     "content": "Phase 4: Auto-seed persistent bootstrap API key + demo product/license on startup",
-    "status": "in_progress"
+    "status": "completed"
   },
   {
     "content": "Phase 4: Backend /admin/quickstart endpoints (info, rotate-key, live-test)",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Phase 4: Frontend /admin/quickstart page with code samples + test button",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Phase 4: Python + JavaScript drop-in client libraries under /app/clients/",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Phase 4: Fix Customer Portal 401-before-redirect issue",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Phase 4: Verify with testing_agent_v3",
-    "status": "pending"
+    "status": "completed"
   }
 ]
