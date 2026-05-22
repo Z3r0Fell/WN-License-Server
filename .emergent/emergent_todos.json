@@ -1,18 +1,18 @@
 [
   {
     "content": "Phase 5: Commit C# (.NET) drop-in client library",
-    "status": "in_progress"
+    "status": "completed"
   },
   {
     "content": "Phase 5: Per-product Quickstart picker (backend + frontend)",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Phase 5: Audit page filter UI (actor_type + action search)",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Phase 5: Test via testing_agent_v3",
-    "status": "pending"
+    "status": "completed"
   }
 ]
