@@ -88,6 +88,11 @@ credentials.json
 *.pem
 *.key
 .credentials
+
+# ...but DO ship the example/template envs so `git clone` users have them
+!**/.env.example
+!**/.env.sample
+!**/.env.template
 -e 
 # Environment and credential files
 .env
@@ -97,5 +102,10 @@ credentials.json
 *.pem
 *.key
 .credentials
+
+# ...but DO ship the example/template envs so `git clone` users have them
+!**/.env.example
+!**/.env.sample
+!**/.env.template
 frontend/node_modules/.cache/default-development/0.pack
 frontend/node_modules/.cache/default-development/0.pack

@@ -216,7 +216,7 @@ cd /opt/watchnexus
 
 ```bash
 cd /opt/watchnexus/deploy
-cp .env.example .env
+cp .env.example .env   # or `cp env.example .env` if the dotfile is missing
 nano .env
 ```
 
@@ -425,6 +425,7 @@ For tighter control set an **IP allowlist** per API key under **Admin → API Ke
 | Symptom                                          | Fix                                                                                                                            |
 |--------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------|
 | `git: command not found`                         | `apt-get update -y && apt-get install -y git`                                                                                  |
+| `.env.example: No such file or directory` after clone | Your old clone predates the `.gitignore` fix that ships envs. Pull latest: `cd /opt/watchnexus && git pull`. As a fallback, `cp env.example .env` (the non-dotfile copy is also tracked). |
 | `install.sh: No such file or directory`          | You haven't cloned the repo yet. Run the `git clone` step in §2.2 first.                                                       |
 | `Permission denied (publickey)` when cloning     | The repo is public — use the HTTPS URL `https://github.com/Z3r0Fell/WN-License-Server.git`, not the SSH `git@github.com:...` URL. |
 | `fatal: destination path '/opt/watchnexus' already exists` | Either delete it (`rm -rf /opt/watchnexus`) and re-clone, or update in place: `cd /opt/watchnexus && git pull`.        |

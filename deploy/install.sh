@@ -139,8 +139,21 @@ chmod +x "$INSTALL_DIR/backend/scripts/backup_mongo.sh" 2>/dev/null || true
 # ---------- 5. .env ----------
 banner "Step 5/7 - Configuration (.env)"
 ENV_FILE="$DEPLOY_DIR/.env"
+# Accept either `.env.example` (canonical) or `env.example` (in case the
+# dotfile got dropped by a .gitignore upstream).
+ENV_EXAMPLE=""
+for candidate in "$DEPLOY_DIR/.env.example" "$DEPLOY_DIR/env.example"; do
+  if [[ -f "$candidate" ]]; then ENV_EXAMPLE="$candidate"; break; fi
+done
+
 if [[ ! -f "$ENV_FILE" ]]; then
-  cp "$DEPLOY_DIR/.env.example" "$ENV_FILE"
+  if [[ -z "$ENV_EXAMPLE" ]]; then
+    red "  Could not find .env.example or env.example in $DEPLOY_DIR"
+    red "  Re-clone the repo or pull the latest commit and retry."
+    exit 1
+  fi
+  cp "$ENV_EXAMPLE" "$ENV_FILE"
+  green "  created $ENV_FILE from $(basename "$ENV_EXAMPLE")"
 fi
 
 jwt=$(openssl rand -hex 32)
