@@ -17,10 +17,10 @@
   },
   {
     "content": "Run testing_agent_v3 on backend + frontend for Phase 6 regressions",
-    "status": "in_progress"
+    "status": "completed"
   },
   {
     "content": "Update plan.md to mark Phase 6 as COMPLETED",
-    "status": "pending"
+    "status": "completed"
   }
 ]
