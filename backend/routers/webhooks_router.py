@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Request
 from audit import log as audit_log
 from db import db, now_iso
 from email_sender import render_purchase_email, send_email
+import runtime_settings
 from webhooks_sig import (
     extract_email_gumroad, extract_email_lemonsqueezy, extract_email_paddle,
     extract_email_stripe, verify_gumroad, verify_lemonsqueezy, verify_paddle,
@@ -93,7 +94,8 @@ async def _provision_license(email: str | None, product_slug_hint: str | None,
 
     # Fire-and-forget email
     try:
-        portal_url = os.environ.get("APP_PUBLIC_URL", "").rstrip("/") + "/portal"
+        portal_url = (runtime_settings.get("CUSTOMER_PORTAL_URL")
+                      or runtime_settings.get("APP_PUBLIC_URL").rstrip("/") + "/portal")
         subject, html = render_purchase_email(
             customer_email=email,
             license_key=key,
@@ -122,7 +124,7 @@ async def _provision_license(email: str | None, product_slug_hint: str | None,
 async def lemonsqueezy(request: Request):
     body = await request.body()
     sig = request.headers.get("x-signature", "")
-    secret = os.environ.get("LEMONSQUEEZY_WEBHOOK_SECRET", "")
+    secret = runtime_settings.get("LEMONSQUEEZY_WEBHOOK_SECRET")
     if not verify_lemonsqueezy(body, sig, secret):
         await _store_event("lemonsqueezy", "unknown", "signature_invalid", body, None,
                            error="signature mismatch")
@@ -154,7 +156,7 @@ async def lemonsqueezy(request: Request):
 async def paddle(request: Request):
     body = await request.body()
     sig = request.headers.get("paddle-signature", "")
-    secret = os.environ.get("PADDLE_WEBHOOK_SECRET", "")
+    secret = runtime_settings.get("PADDLE_WEBHOOK_SECRET")
     if not verify_paddle(body, sig, secret):
         await _store_event("paddle", "unknown", "signature_invalid", body, None,
                            error="signature mismatch or expired")
@@ -186,7 +188,7 @@ async def paddle(request: Request):
 async def gumroad(request: Request):
     body = await request.body()
     sig = request.headers.get("x-gumroad-signature", "")
-    secret = os.environ.get("GUMROAD_WEBHOOK_SECRET", "")
+    secret = runtime_settings.get("GUMROAD_WEBHOOK_SECRET")
     if not verify_gumroad(body, sig, secret):
         await _store_event("gumroad", "unknown", "signature_invalid", body, None,
                            error="signature mismatch")
@@ -220,7 +222,7 @@ async def gumroad(request: Request):
 async def stripe(request: Request):
     body = await request.body()
     sig = request.headers.get("stripe-signature", "")
-    secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+    secret = runtime_settings.get("STRIPE_WEBHOOK_SECRET")
     if not verify_stripe(body, sig, secret):
         await _store_event("stripe", "unknown", "signature_invalid", body, None,
                            error="signature mismatch or expired")

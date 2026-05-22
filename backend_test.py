@@ -12,7 +12,7 @@ import sys
 import time
 from datetime import datetime
 
-BASE_URL = "https://nexus-license-hub.preview.emergentagent.com"
+BASE_URL = "https://watchnexus-deploy.preview.emergentagent.com"
 ADMIN_EMAIL = "admin@watchnexus.app"
 ADMIN_PASSWORD = "admin12345"
 

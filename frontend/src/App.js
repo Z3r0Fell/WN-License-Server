@@ -15,11 +15,34 @@ import AdminApiKeys from './pages/AdminApiKeys';
 import AdminBuilds from './pages/AdminBuilds';
 import AdminWebhooks from './pages/AdminWebhooks';
 import AdminAudit from './pages/AdminAudit';
+import AdminSettings from './pages/AdminSettings';
 import PortalLogin from './pages/PortalLogin';
 import PortalRegister from './pages/PortalRegister';
 import PortalLayout from './components/PortalLayout';
 import PortalDashboard from './pages/PortalDashboard';
 import PortalDownloads from './pages/PortalDownloads';
+
+/**
+ * Customer-portal hostnames. When the page is served from one of these
+ * (set via REACT_APP_CUSTOMER_PORTAL_HOST or `techhub.*`) the SPA boots
+ * straight into /portal/login instead of the marketing landing page.
+ */
+const CUSTOMER_PORTAL_HOST = (process.env.REACT_APP_CUSTOMER_PORTAL_HOST || '').trim();
+
+function isCustomerPortalHostname() {
+  if (typeof window === 'undefined') return false;
+  const host = (window.location.hostname || '').toLowerCase();
+  if (!host) return false;
+  if (CUSTOMER_PORTAL_HOST && host === CUSTOMER_PORTAL_HOST.toLowerCase()) return true;
+  return host.startsWith('techhub.');
+}
+
+function RootRedirect() {
+  if (isCustomerPortalHostname()) {
+    return <Navigate to="/portal/login" replace />;
+  }
+  return <Landing />;
+}
 
 function App() {
   return (
@@ -27,7 +50,7 @@ function App() {
       <BrowserRouter>
         <Toaster richColors theme="dark" position="top-right" />
         <Routes>
-          <Route path="/" element={<Landing />} />
+          <Route path="/" element={<RootRedirect />} />
           <Route path="/docs" element={<Docs />} />
 
           {/* Admin */}
@@ -42,6 +65,7 @@ function App() {
             <Route path="builds" element={<AdminBuilds />} />
             <Route path="webhooks" element={<AdminWebhooks />} />
             <Route path="audit" element={<AdminAudit />} />
+            <Route path="settings" element={<AdminSettings />} />
           </Route>
 
           {/* Customer portal */}

@@ -28,6 +28,7 @@ from routers import integrate as integrate_router
 from routers import public as public_router
 from routers import quickstart as quickstart_router
 from routers import webhooks_router
+import runtime_settings
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -119,6 +120,7 @@ app.add_middleware(
 @app.on_event("startup")
 async def on_startup():
     _load_rsa_keys()
+    await runtime_settings.refresh_cache()
     seed_email = os.environ.get("SEED_ADMIN_EMAIL", "admin@watchnexus.app").lower()
     seed_pw = os.environ.get("SEED_ADMIN_PASSWORD", "admin12345")
     existing = await db.admin_users.find_one({"email": seed_email})

@@ -16,6 +16,7 @@ from audit import log as audit_log
 from crypto_core import (generate_hmac_license, generate_rsa_license,
                          get_rsa_public_pem)
 from db import db, now_iso, serialize_doc
+import runtime_settings
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -175,7 +176,9 @@ async def _create_license(product_id: str, customer_email: Optional[str],
     if customer_email:
         try:
             from email_sender import render_purchase_email, send_email
-            portal_url = os.environ.get("APP_PUBLIC_URL", "").rstrip("/") + "/portal"
+            import runtime_settings as rs
+            portal_url = (rs.get("CUSTOMER_PORTAL_URL")
+                          or rs.get("APP_PUBLIC_URL").rstrip("/") + "/portal")
             subject, html = render_purchase_email(
                 customer_email=customer_email,
                 license_key=key,
@@ -485,3 +488,51 @@ async def audit_list(admin=Depends(get_current_admin), limit: int = 300,
 @router.get("/rsa-public-key")
 async def rsa_pubkey(admin=Depends(get_current_admin)):
     return {"pem": get_rsa_public_pem()}
+
+
+# -------------------- Runtime settings --------------------
+@router.get("/settings")
+async def settings_list(admin=Depends(get_current_admin)):
+    """Return all editable settings (secrets returned masked + has_value flag)."""
+    return runtime_settings.public_view()
+
+
+class SettingsUpdate(BaseModel):
+    values: dict[str, str | None]
+
+
+@router.put("/settings")
+async def settings_update(body: SettingsUpdate, request: Request,
+                          admin=Depends(get_current_admin)):
+    """Bulk upsert. Unknown keys ignored. Pass empty string to clear a value.
+    Returns the refreshed public view."""
+    accepted = {k: (v or "") for k, v in body.values.items()
+                if k in runtime_settings.EDITABLE_KEYS}
+    await runtime_settings.set_many(accepted, actor_email=admin.get("email"))
+    await audit_log("admin", admin["id"], admin["email"], "settings.update",
+                    severity="warning",
+                    meta={"keys": sorted(list(accepted.keys()))},
+                    ip=request.client.host if request.client else None)
+    return runtime_settings.public_view()
+
+
+@router.post("/settings/test-email")
+async def settings_test_email(body: dict, admin=Depends(get_current_admin)):
+    """Send a test email to verify SendGrid/SMTP configuration."""
+    to = (body.get("to") or admin.get("email") or "").strip()
+    if not to:
+        raise HTTPException(400, "Missing 'to' address")
+    from email_sender import send_email
+    result = send_email(
+        to=to,
+        subject="WatchNexus test email",
+        html=(
+            "<p>Hello from your <b>WatchNexus Licensing Server</b>.</p>"
+            "<p>If you're reading this, the email provider is configured correctly.</p>"
+            "<p style='color:#64748B;font-size:12px'>Sent from the /admin/settings test button.</p>"
+        ),
+    )
+    await audit_log("admin", admin["id"], admin["email"], "settings.test_email",
+                    meta={"to": to, "provider": result.get("provider"),
+                          "sent": result.get("sent", False)})
+    return result

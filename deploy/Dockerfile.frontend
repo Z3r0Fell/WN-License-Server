@@ -1,4 +1,5 @@
-# WatchNexus frontend image - builds React, serves with nginx (also reverse-proxies /api to backend)
+# WatchNexus frontend image - builds React (with REACT_APP_* baked in),
+# serves with nginx (inner) which also reverse-proxies /api to the backend.
 FROM node:20-alpine AS build
 WORKDIR /app
 
@@ -6,11 +7,12 @@ COPY frontend/package.json frontend/yarn.lock ./
 RUN yarn install --frozen-lockfile --network-timeout 600000
 
 COPY frontend/ ./
-# REACT_APP_BACKEND_URL is baked into the build at build time. The default is
-# empty ("") so axios will use a same-origin URL like "/api" - perfect when
-# nginx serves both the static site and proxies /api to the backend.
+
+# Build-time env baked into the bundle
 ARG REACT_APP_BACKEND_URL=""
+ARG REACT_APP_CUSTOMER_PORTAL_HOST=""
 ENV REACT_APP_BACKEND_URL=$REACT_APP_BACKEND_URL
+ENV REACT_APP_CUSTOMER_PORTAL_HOST=$REACT_APP_CUSTOMER_PORTAL_HOST
 RUN yarn build
 
 FROM nginx:1.27-alpine

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
 import {
   Home, Package, KeyRound, Users, FileBarChart2, Webhook,
-  Download, ShieldCheck, LogOut, ListChecks, Zap,
+  Download, ShieldCheck, LogOut, ListChecks, Zap, Cog,
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { adminAuth } from '../lib/api';
@@ -18,6 +18,7 @@ const NAV = [
   { to: '/admin/builds', icon: Download, label: 'Builds', testid: 'nav-admin-builds' },
   { to: '/admin/webhooks', icon: Webhook, label: 'Webhooks', testid: 'nav-admin-webhooks' },
   { to: '/admin/audit', icon: FileBarChart2, label: 'Audit', testid: 'nav-admin-audit' },
+  { to: '/admin/settings', icon: Cog, label: 'Settings', testid: 'nav-admin-settings' },
 ];
 
 export default function AdminLayout() {

@@ -1,7 +1,7 @@
-# WatchNexus production stack
+# WatchNexus production stack (admin + customer portal subdomain).
 # Usage:
-#   1) cp .env.example .env  (and edit values)
-#   2) docker compose up -d --build
+#   cd deploy && cp .env.example .env && nano .env
+#   docker compose up -d --build
 services:
   mongo:
     image: mongo:7
@@ -39,9 +39,8 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile.frontend
       args:
-        # Empty string => same-origin API. Override only if frontend is on a
-        # different host than the backend.
         REACT_APP_BACKEND_URL: ""
+        REACT_APP_CUSTOMER_PORTAL_HOST: ${CUSTOMER_DOMAIN:-techhub.watchnexus.ca}
     restart: unless-stopped
     depends_on: [backend]
     networks: [internal]
@@ -58,15 +57,6 @@ services:
       - certbot_webroot:/var/www/certbot
     depends_on: [web, backend]
     networks: [internal]
-
-  certbot:
-    image: certbot/certbot:latest
-    profiles: ["certbot"]   # only runs when explicitly requested
-    volumes:
-      - /etc/letsencrypt:/etc/letsencrypt
-      - certbot_webroot:/var/www/certbot
-    entrypoint: ["/bin/sh", "-c"]
-    command: ["certbot certonly --webroot -w /var/www/certbot --non-interactive --agree-tos -m ${LETSENCRYPT_EMAIL} -d ${DOMAIN}"]
 
 volumes:
   mongo_data:

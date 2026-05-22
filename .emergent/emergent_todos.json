@@ -1,18 +1,30 @@
 [
   {
-    "content": "Phase 5: Commit C# (.NET) drop-in client library",
-    "status": "completed"
+    "content": "Phase 6: Backend runtime settings store (Mongo-backed, env-fallback) + /admin/settings endpoints",
+    "status": "in_progress"
   },
   {
-    "content": "Phase 5: Per-product Quickstart picker (backend + frontend)",
-    "status": "completed"
+    "content": "Phase 6: Re-wire webhooks + email sender to read from runtime settings",
+    "status": "pending"
   },
   {
-    "content": "Phase 5: Audit page filter UI (actor_type + action search)",
-    "status": "completed"
+    "content": "Phase 6: Frontend /admin/settings page (webhooks, email, branding/URLs)",
+    "status": "pending"
   },
   {
-    "content": "Phase 5: Test via testing_agent_v3",
-    "status": "completed"
+    "content": "Phase 6: Customer portal subdomain - URL config + frontend hostname-aware routing",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 6: One-command Ubuntu installer (install.sh) - prereqs, certs, autostart, dual-domain nginx",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 6: DEPLOY.md - DNS A-record walkthrough, dual-domain instructions",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 6: Verify with testing_agent_v3",
+    "status": "pending"
   }
 ]

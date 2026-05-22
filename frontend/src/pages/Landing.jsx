@@ -29,9 +29,13 @@ const FEATURES = [
 
 export default function Landing() {
   const [health, setHealth] = useState(null);
+  const [brand, setBrand] = useState(null);
   useEffect(() => {
     publicApi.get('/health').then((r) => setHealth(r.data)).catch(() => setHealth({ status: 'down' }));
+    publicApi.get('/branding').then((r) => setBrand(r.data)).catch(() => setBrand(null));
   }, []);
+  const portalHref = brand?.customer_portal_url || '/portal/login';
+  const portalIsExternal = portalHref.startsWith('http');
 
   return (
     <div className="dark min-h-screen bg-background text-foreground">
@@ -47,7 +51,11 @@ export default function Landing() {
           </Link>
           <nav className="flex items-center gap-1">
             <Link to="/docs" className="text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-lg hover:bg-muted/40 transition-colors" data-testid="landing-docs-link">Docs</Link>
-            <Link to="/portal/login" className="text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-lg hover:bg-muted/40 transition-colors" data-testid="landing-portal-link">Customer portal</Link>
+            {portalIsExternal ? (
+              <a href={portalHref} className="text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-lg hover:bg-muted/40 transition-colors" data-testid="landing-portal-link">Customer portal</a>
+            ) : (
+              <Link to="/portal/login" className="text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-lg hover:bg-muted/40 transition-colors" data-testid="landing-portal-link">Customer portal</Link>
+            )}
             <Link to="/admin/login">
               <Button size="sm" className="bg-emerald-600 hover:bg-emerald-500 text-white" data-testid="landing-admin-login-cta">
                 Admin sign in <ArrowRight className="h-3.5 w-3.5 ml-1" />
