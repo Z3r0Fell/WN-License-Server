@@ -1,9 +1,11 @@
 [Unit]
 Description=Daily MongoDB backup for WatchNexus Licensing Server
+Requires=docker.service
+After=docker.service
 
 [Service]
 Type=oneshot
 WorkingDirectory=/opt/watchnexus/deploy
-ExecStart=/usr/bin/docker compose exec -T backend bash /app/scripts/backup_mongo.sh 14
+ExecStart=/usr/bin/bash /opt/watchnexus/deploy/backup_host.sh 14
 StandardOutput=append:/var/log/watchnexus_backup.log
 StandardError=append:/var/log/watchnexus_backup.log

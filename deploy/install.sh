@@ -135,6 +135,7 @@ else
         "$SOURCE_DIR/" "$INSTALL_DIR/"
 fi
 chmod +x "$INSTALL_DIR/backend/scripts/backup_mongo.sh" 2>/dev/null || true
+chmod +x "$INSTALL_DIR/deploy/backup_host.sh" 2>/dev/null || true
 
 # ---------- 5. .env ----------
 banner "Step 5/7 - Configuration (.env)"

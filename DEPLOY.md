@@ -326,19 +326,19 @@ docker compose up -d --build
 ### 5.4 Backups
 
 - **Schedule:** every day at 03:00 UTC (`watchnexus-backup.timer`).
-- **Location:** `/opt/watchnexus/deploy/backups/watchnexus_<db>_<timestamp>.tar.gz`.
-- **Retention:** 14 days.
+- **Engine:** runs `mongodump --archive --gzip` *inside the `mongo` container* (where the tool always exists) via the host script `deploy/backup_host.sh`.
+- **Location:** `/opt/watchnexus/deploy/backups/watchnexus_<db>_<timestamp>.archive.gz`.
+- **Retention:** 14 days (configurable: pass a different number to `backup_host.sh`).
 - **Manual backup right now:**
   ```bash
-  cd /opt/watchnexus/deploy
-  docker compose exec -T backend bash /app/scripts/backup_mongo.sh 14
+  sudo bash /opt/watchnexus/deploy/backup_host.sh 14
   ```
 - **Restore from a backup:**
   ```bash
-  cd /opt/watchnexus/deploy/backups
-  tar -xzf watchnexus_watchnexus_20260101T030000Z.tar.gz
-  docker compose cp watchnexus_watchnexus_20260101T030000Z mongo:/restore
-  docker compose exec mongo mongorestore --drop /restore
+  cd /opt/watchnexus/deploy
+  # Replace the filename with the dump you want to restore:
+  docker compose exec -T mongo mongorestore --drop --gzip \
+      --archive=/backups/watchnexus_watchnexus_20260101T030000Z.archive.gz
   ```
 - **Offsite copy (recommended).** Example with rclone:
   ```bash
