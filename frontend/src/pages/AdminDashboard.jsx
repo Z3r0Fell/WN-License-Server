@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { adminApi } from '../lib/api';
 import { Skeleton } from '../components/ui/skeleton';
 import { StatusPill } from '../components/StatusPill';
 import { CopyChip } from '../components/CopyChip';
-import { KeyRound, Activity, Users, Package, Webhook, FileBarChart2 } from 'lucide-react';
+import { KeyRound, Activity, Users, Package, Webhook, FileBarChart2, Zap, ArrowRight } from 'lucide-react';
 
 function StatCard({ icon: Icon, label, value, hint, testid }) {
   return (
@@ -34,6 +35,24 @@ export default function AdminDashboard() {
           <p className="text-sm text-muted-foreground mt-1">A high-level look at your licensing health.</p>
         </div>
       </div>
+
+      {/* Integration kit banner */}
+      <Link
+        to="/admin/quickstart"
+        className="mt-6 group flex items-center justify-between gap-4 rounded-xl border border-emerald-500/20 bg-gradient-to-r from-emerald-500/10 via-emerald-500/5 to-transparent p-4 hover:border-emerald-500/40 transition-colors"
+        data-testid="admin-dashboard-quickstart-banner"
+      >
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center">
+            <Zap className="h-5 w-5 text-emerald-400" />
+          </div>
+          <div>
+            <div className="text-sm font-semibold">Tie WatchNexus into your app suite</div>
+            <div className="text-xs text-muted-foreground">Bootstrap API key, demo license, copy-paste code, live test. Open the Quickstart.</div>
+          </div>
+        </div>
+        <ArrowRight className="h-4 w-4 text-emerald-400 group-hover:translate-x-0.5 transition-transform" />
+      </Link>
 
       {loading ? (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">

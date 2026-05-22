@@ -1,8 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
 import {
   Home, Package, KeyRound, Users, FileBarChart2, Webhook,
-  Download, ShieldCheck, LogOut, ListChecks,
+  Download, ShieldCheck, LogOut, ListChecks, Zap,
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { adminAuth } from '../lib/api';
@@ -10,6 +10,7 @@ import { cn } from '../lib/utils';
 
 const NAV = [
   { to: '/admin', icon: Home, label: 'Dashboard', testid: 'nav-admin-dashboard' },
+  { to: '/admin/quickstart', icon: Zap, label: 'Quickstart', testid: 'nav-admin-quickstart' },
   { to: '/admin/licenses', icon: KeyRound, label: 'Licenses', testid: 'nav-admin-licenses' },
   { to: '/admin/products', icon: Package, label: 'Products', testid: 'nav-admin-products' },
   { to: '/admin/customers', icon: Users, label: 'Customers', testid: 'nav-admin-customers' },
@@ -22,11 +23,19 @@ const NAV = [
 export default function AdminLayout() {
   const location = useLocation();
   const navigate = useNavigate();
+  const [authed, setAuthed] = useState(null);
   const user = adminAuth.getUser();
 
   useEffect(() => {
-    if (!adminAuth.getToken()) navigate('/admin/login', { replace: true });
+    if (!adminAuth.getToken()) {
+      setAuthed(false);
+      navigate('/admin/login', { replace: true });
+    } else {
+      setAuthed(true);
+    }
   }, [navigate]);
+
+  if (!authed) return null;
 
   const onLogout = () => {
     adminAuth.clear();

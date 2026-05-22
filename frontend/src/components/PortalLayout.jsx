@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
 import { KeyRound, Download, LogOut, ListChecks, LifeBuoy } from 'lucide-react';
 import { Button } from './ui/button';
@@ -14,11 +14,22 @@ const NAV = [
 export default function PortalLayout() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [authed, setAuthed] = useState(null); // null=checking, false=redirect, true=ok
   const user = customerAuth.getUser();
 
   useEffect(() => {
-    if (!customerAuth.getToken()) navigate('/portal/login', { replace: true });
+    if (!customerAuth.getToken()) {
+      setAuthed(false);
+      navigate('/portal/login', { replace: true });
+    } else {
+      setAuthed(true);
+    }
   }, [navigate]);
+
+  if (!authed) {
+    // Render nothing while we redirect, so children don't fire auth-required fetches.
+    return null;
+  }
 
   const onLogout = () => {
     customerAuth.clear();
@@ -57,9 +68,7 @@ export default function PortalLayout() {
               );
             })}
             <div className="ml-3 pl-3 border-l border-border flex items-center gap-2">
-              <span className="text-xs text-muted-foreground hidden sm:inline">
-                {user?.email}
-              </span>
+              <span className="text-xs text-muted-foreground hidden sm:inline">{user?.email}</span>
               <Button size="sm" variant="ghost" onClick={onLogout} data-testid="portal-logout-button">
                 <LogOut className="h-3.5 w-3.5 mr-1" /> Logout
               </Button>

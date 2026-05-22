@@ -26,6 +26,7 @@ from routers import admin as admin_router
 from routers import customer as customer_router
 from routers import integrate as integrate_router
 from routers import public as public_router
+from routers import quickstart as quickstart_router
 from routers import webhooks_router
 
 logging.basicConfig(level=logging.INFO,
@@ -99,6 +100,7 @@ from fastapi import APIRouter
 api = APIRouter(prefix="/api")
 api.include_router(public_router.router)
 api.include_router(admin_router.router)
+api.include_router(quickstart_router.router)
 api.include_router(customer_router.router)
 api.include_router(integrate_router.router)
 api.include_router(webhooks_router.router)
@@ -145,6 +147,65 @@ async def on_startup():
             "updated_at": now_iso(),
         })
         logger.info("Seeded default product 'watchnexus-pro'")
+
+    # -------- Bootstrap integration kit --------
+    # A persistent API key + a demo license, so the WatchNexus app suite has
+    # something to talk to without any admin clicks. Rotate via admin UI later.
+    import secrets
+    import uuid
+    from crypto_core import generate_hmac_license, generate_rsa_license
+    existing_boot = await db.api_keys.find_one({"is_bootstrap": True, "status": "active"})
+    if not existing_boot:
+        product = await db.products.find_one({"slug": "watchnexus-pro"}, {"_id": 0}) \
+            or await db.products.find_one({}, {"_id": 0}, sort=[("created_at", 1)])
+        raw = "wnk_" + secrets.token_urlsafe(32)
+        await db.api_keys.insert_one({
+            "id": str(uuid.uuid4()),
+            "name": "WatchNexus App Suite (bootstrap)",
+            "product_id": None,
+            "scopes": ["activate", "validate", "deactivate"],
+            "allowed_ips": [],
+            "key": raw,
+            "is_bootstrap": True,
+            "status": "active",
+            "created_at": now_iso(),
+            "last_used_at": None,
+            "last_used_ip": None,
+        })
+        logger.warning("=" * 60)
+        logger.warning("WATCHNEXUS BOOTSTRAP API KEY (use to integrate your app):")
+        logger.warning("  %s", raw)
+        logger.warning("Find this any time at /admin/quickstart in the admin panel.")
+        logger.warning("=" * 60)
+
+        # Demo license under the default product, no email, 3 seats
+        if product:
+            demo_id = str(uuid.uuid4())
+            if product["signing_method"] == "rsa":
+                demo_key = generate_rsa_license(demo_id, product["slug"])
+            else:
+                hmac_secret = os.environ.get("HMAC_LICENSE_SECRET", "dev").encode()
+                demo_key = generate_hmac_license(demo_id, product["slug"], hmac_secret)
+            await db.licenses.insert_one({
+                "id": demo_id,
+                "key": demo_key,
+                "product_id": product["id"],
+                "product_slug": product["slug"],
+                "signing_method": product["signing_method"],
+                "fingerprint_mode": product["fingerprint_mode"],
+                "customer_email": None,
+                "customer_id": None,
+                "plan": "demo",
+                "seats": 3,
+                "expires_at": None,
+                "notes": "Demo license auto-generated for the quickstart. Safe to revoke later.",
+                "status": "active",
+                "source": "bootstrap",
+                "is_bootstrap": True,
+                "created_at": now_iso(),
+                "updated_at": now_iso(),
+            })
+            logger.info("Seeded demo license under product '%s'", product["slug"])
     await db.licenses.create_index("key", unique=True)
     await db.licenses.create_index("customer_email")
     await db.licenses.create_index("product_id")

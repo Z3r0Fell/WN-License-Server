@@ -7,6 +7,7 @@ import Docs from './pages/Docs';
 import AdminLogin from './pages/AdminLogin';
 import AdminLayout from './components/AdminLayout';
 import AdminDashboard from './pages/AdminDashboard';
+import AdminQuickstart from './pages/AdminQuickstart';
 import AdminProducts from './pages/AdminProducts';
 import AdminLicenses from './pages/AdminLicenses';
 import AdminCustomers from './pages/AdminCustomers';
@@ -33,6 +34,7 @@ function App() {
           <Route path="/admin/login" element={<AdminLogin />} />
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<AdminDashboard />} />
+            <Route path="quickstart" element={<AdminQuickstart />} />
             <Route path="products" element={<AdminProducts />} />
             <Route path="licenses" element={<AdminLicenses />} />
             <Route path="customers" element={<AdminCustomers />} />

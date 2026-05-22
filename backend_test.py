@@ -1239,10 +1239,277 @@ class WatchNexusAPITester:
                 return True
         return False
 
+    # ========== Phase 4: Quickstart / Integration Kit ==========
+    def test_quickstart_get_info(self):
+        """Test GET /admin/quickstart returns bootstrap kit info"""
+        success, response = self.run_test(
+            "Quickstart - Get Info",
+            "GET",
+            "admin/quickstart",
+            200
+        )
+        if success:
+            # Check required fields
+            required = ['base_url', 'api_key', 'api_key_id', 'demo_license', 'endpoints']
+            has_all = all(key in response for key in required)
+            if not has_all:
+                print(f"   ❌ Missing required fields: {[k for k in required if k not in response]}")
+                return False
+            
+            # Check api_key starts with 'wnk_'
+            if not response.get('api_key', '').startswith('wnk_'):
+                print(f"   ❌ API key doesn't start with 'wnk_': {response.get('api_key', '')[:20]}")
+                return False
+            
+            # Check demo_license key starts with 'WNX-'
+            demo_lic = response.get('demo_license', {})
+            if not demo_lic.get('key', '').startswith('WNX-'):
+                print(f"   ❌ Demo license key doesn't start with 'WNX-': {demo_lic.get('key', '')[:20]}")
+                return False
+            
+            # Check endpoints
+            endpoints = response.get('endpoints', {})
+            required_endpoints = ['activate', 'validate', 'deactivate', 'public_key', 'health']
+            has_endpoints = all(ep in endpoints for ep in required_endpoints)
+            if not has_endpoints:
+                print(f"   ❌ Missing endpoints: {[ep for ep in required_endpoints if ep not in endpoints]}")
+                return False
+            
+            # Store bootstrap key for later tests
+            self.bootstrap_api_key = response.get('api_key')
+            self.bootstrap_demo_license = demo_lic.get('key')
+            
+            print(f"   ✓ Bootstrap API key: {self.bootstrap_api_key[:20]}...")
+            print(f"   ✓ Demo license: {self.bootstrap_demo_license[:20]}...")
+            print(f"   ✓ Endpoints: {', '.join(required_endpoints)}")
+            return True
+        return False
+
+    def test_quickstart_run_test(self):
+        """Test POST /admin/quickstart/test runs real activate->validate->deactivate cycle"""
+        success, response = self.run_test(
+            "Quickstart - Run Test",
+            "POST",
+            "admin/quickstart/test",
+            200,
+            data={}
+        )
+        if success:
+            # Check response structure
+            required = ['ok', 'license_key', 'fingerprint', 'steps']
+            has_all = all(key in response for key in required)
+            if not has_all:
+                print(f"   ❌ Missing required fields: {[k for k in required if k not in response]}")
+                return False
+            
+            if response.get('ok') != True:
+                print(f"   ❌ ok is not True")
+                return False
+            
+            # Check steps
+            steps = response.get('steps', [])
+            if len(steps) != 3:
+                print(f"   ❌ Expected 3 steps, got {len(steps)}")
+                return False
+            
+            # Check step labels
+            expected_labels = [
+                'POST /api/integrate/activate',
+                'POST /api/integrate/validate',
+                'POST /api/integrate/deactivate'
+            ]
+            for i, (step, expected_label) in enumerate(zip(steps, expected_labels)):
+                if step.get('label') != expected_label:
+                    print(f"   ❌ Step {i} label mismatch: expected '{expected_label}', got '{step.get('label')}'")
+                    return False
+                if step.get('status') != 200:
+                    print(f"   ❌ Step {i} status is not 200: {step.get('status')}")
+                    return False
+            
+            # Check step 0 (activate) has activation_id and activation_token
+            activate_resp = steps[0].get('response', {})
+            if not activate_resp.get('activation_id') or not activate_resp.get('activation_token'):
+                print(f"   ❌ Activate step missing activation_id or activation_token")
+                return False
+            
+            # Check step 1 (validate) has valid:true and mode:'online'
+            validate_resp = steps[1].get('response', {})
+            if validate_resp.get('valid') != True:
+                print(f"   ❌ Validate step valid is not True")
+                return False
+            if validate_resp.get('mode') != 'online':
+                print(f"   ❌ Validate step mode is not 'online': {validate_resp.get('mode')}")
+                return False
+            
+            # Check step 2 (deactivate) has ok:true
+            deactivate_resp = steps[2].get('response', {})
+            if deactivate_resp.get('ok') != True:
+                print(f"   ❌ Deactivate step ok is not True")
+                return False
+            
+            # Check activation_id matches between activate and deactivate
+            if activate_resp.get('activation_id') != deactivate_resp.get('activation_id'):
+                print(f"   ❌ Activation ID mismatch between activate and deactivate")
+                return False
+            
+            print(f"   ✓ Test cycle completed successfully")
+            print(f"   ✓ Fingerprint: {response.get('fingerprint', '')[:32]}...")
+            return True
+        return False
+
+    def test_quickstart_test_multiple_times(self):
+        """Test running /admin/quickstart/test 4 times (demo license has 3 seats, should recycle)"""
+        print(f"\n🔍 Testing Quickstart Test Multiple Times (4x with 3 seats)...")
+        self.tests_run += 1
+        
+        try:
+            results = []
+            for i in range(4):
+                success, response = self.run_test(
+                    f"Quickstart Test Run {i+1}/4",
+                    "POST",
+                    "admin/quickstart/test",
+                    200,
+                    data={}
+                )
+                results.append(success)
+                if not success:
+                    print(f"   ❌ Test run {i+1} failed")
+                    return False
+            
+            if all(results):
+                self.tests_passed += 1
+                print(f"✅ Passed - All 4 test runs succeeded (seat recycling works)")
+                return True
+            else:
+                print(f"❌ Failed - Some test runs failed")
+                return False
+        except Exception as e:
+            print(f"❌ Failed - Error: {str(e)}")
+            return False
+
+    def test_quickstart_rotate_key(self):
+        """Test POST /admin/quickstart/rotate-key rotates the bootstrap key"""
+        if not hasattr(self, 'bootstrap_api_key'):
+            print("   ⚠️  Skipped - No bootstrap API key available")
+            return False
+        
+        old_key = self.bootstrap_api_key
+        
+        success, response = self.run_test(
+            "Quickstart - Rotate Key",
+            "POST",
+            "admin/quickstart/rotate-key",
+            200,
+            data={}
+        )
+        if success:
+            new_key = response.get('api_key')
+            if not new_key or not new_key.startswith('wnk_'):
+                print(f"   ❌ New key doesn't start with 'wnk_': {new_key}")
+                return False
+            
+            if new_key == old_key:
+                print(f"   ❌ New key is same as old key")
+                return False
+            
+            print(f"   ✓ New key: {new_key[:20]}...")
+            
+            # Test that old key is revoked (should return 401)
+            url = f"{self.base_url}/integrate/activate"
+            headers = {
+                'X-API-Key': old_key,
+                'Content-Type': 'application/json'
+            }
+            
+            print(f"   Testing old key is revoked...")
+            try:
+                resp = requests.post(url, json={
+                    "license_key": self.bootstrap_demo_license,
+                    "hardware_id": "test-old-key"
+                }, headers=headers, timeout=10)
+                
+                if resp.status_code == 401:
+                    print(f"   ✓ Old key correctly revoked (401)")
+                else:
+                    print(f"   ❌ Old key still works (status: {resp.status_code})")
+                    return False
+            except Exception as e:
+                print(f"   ❌ Error testing old key: {str(e)}")
+                return False
+            
+            # Test that new key works
+            print(f"   Testing new key works...")
+            headers['X-API-Key'] = new_key
+            try:
+                resp = requests.post(url, json={
+                    "license_key": self.bootstrap_demo_license,
+                    "hardware_id": "test-new-key-" + str(int(time.time())),
+                    "domain": "test.example.com"
+                }, headers=headers, timeout=10)
+                
+                if resp.status_code == 200:
+                    print(f"   ✓ New key works (200)")
+                    self.bootstrap_api_key = new_key  # Update for future tests
+                    return True
+                else:
+                    print(f"   ❌ New key doesn't work (status: {resp.status_code})")
+                    return False
+            except Exception as e:
+                print(f"   ❌ Error testing new key: {str(e)}")
+                return False
+        return False
+
+    def test_bootstrap_key_with_integrate_activate(self):
+        """Test bootstrap API key works with /integrate/activate end-to-end"""
+        if not hasattr(self, 'bootstrap_api_key') or not hasattr(self, 'bootstrap_demo_license'):
+            print("   ⚠️  Skipped - No bootstrap key or demo license available")
+            return False
+        
+        url = f"{self.base_url}/integrate/activate"
+        headers = {
+            'X-API-Key': self.bootstrap_api_key,
+            'Content-Type': 'application/json'
+        }
+        data = {
+            "license_key": self.bootstrap_demo_license,
+            "hardware_id": "abc",
+            "domain": "example.com",
+            "device_name": "Bootstrap Test Device"
+        }
+        
+        print(f"\n🔍 Testing Bootstrap Key with Integrate Activate...")
+        self.tests_run += 1
+        
+        try:
+            response = requests.post(url, json=data, headers=headers, timeout=10)
+            
+            if response.status_code == 200:
+                resp_json = response.json()
+                if resp_json.get('activation_token') and resp_json.get('grace_until'):
+                    self.tests_passed += 1
+                    print(f"✅ Passed - Bootstrap key works with /integrate/activate")
+                    print(f"   Activation ID: {resp_json.get('activation_id')}")
+                    print(f"   Grace until: {resp_json.get('grace_until')}")
+                    return True
+                else:
+                    print(f"❌ Failed - Missing activation_token or grace_until")
+                    return False
+            else:
+                print(f"❌ Failed - Status: {response.status_code}")
+                try:
+                    print(f"   Response: {response.json()}")
+                except:
+                    print(f"   Response: {response.text[:200]}")
+                return False
+        except Exception as e:
+            print(f"❌ Failed - Error: {str(e)}")
+            return False
+
     def run_all_tests(self):
         """Run all tests in sequence"""
         print("=" * 60)
-        print("WatchNexus Licensing Server - Backend API Tests (Phase 3)")
+        print("WatchNexus Licensing Server - Backend API Tests (Phase 4)")
         print("=" * 60)
         
         # Health & Public
@@ -1253,6 +1520,16 @@ class WatchNexusAPITester:
         self.test_admin_login()
         self.test_admin_login_wrong_password()
         self.test_admin_me()
+        
+        # Phase 4: Quickstart (test early to get bootstrap key)
+        print("\n" + "=" * 60)
+        print("🚀 Phase 4: Quickstart / Integration Kit Tests")
+        print("=" * 60)
+        self.test_quickstart_get_info()
+        self.test_quickstart_run_test()
+        self.test_quickstart_test_multiple_times()
+        self.test_bootstrap_key_with_integrate_activate()
+        self.test_quickstart_rotate_key()
         
         # Products
         self.test_products_list()
