@@ -2,8 +2,11 @@
 
 Surfaces a ready-to-use API key + demo license + public base URL so the
 WatchNexus application suite can be tied in without manual setup.
+
+The demo license is **per product** - so when an admin clicks `Quickstart`
+they can pick which product to test against, and a dedicated bootstrap
+demo license is lazily created under that product the first time.
 """
-import hashlib
 import os
 import secrets
 import uuid
@@ -27,7 +30,6 @@ def _public_base_url(request: Request) -> str:
     env = os.environ.get("APP_PUBLIC_URL", "").rstrip("/")
     if env:
         return env
-    # Reconstruct from request (honors X-Forwarded-Proto)
     proto = request.headers.get("x-forwarded-proto", request.url.scheme)
     host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
     return f"{proto}://{host}"
@@ -37,80 +39,110 @@ async def _bootstrap_key_record() -> dict | None:
     return await db.api_keys.find_one({"is_bootstrap": True, "status": "active"}, {"_id": 0})
 
 
-async def _bootstrap_license_record() -> dict | None:
-    return await db.licenses.find_one({"is_bootstrap": True, "status": "active"}, {"_id": 0})
+async def _bootstrap_license_for_product(product_id: str) -> dict | None:
+    return await db.licenses.find_one(
+        {"is_bootstrap": True, "status": "active", "product_id": product_id},
+        {"_id": 0},
+    )
 
 
-async def _ensure_bootstrap_kit() -> tuple[dict, dict | None]:
-    """Make sure a bootstrap key + license exist. Creates them lazily if missing
-    (e.g. after a rotation that revoked the previous one)."""
+async def _ensure_bootstrap_key() -> dict:
+    """Make sure a bootstrap API key exists. Creates lazily if missing."""
+    key_rec = await _bootstrap_key_record()
+    if key_rec:
+        return key_rec
+    raw = "wnk_" + secrets.token_urlsafe(32)
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name": "WatchNexus App Suite (bootstrap)",
+        "product_id": None,
+        "scopes": ["activate", "validate", "deactivate"],
+        "allowed_ips": [],
+        "key": raw,
+        "is_bootstrap": True,
+        "status": "active",
+        "created_at": now_iso(),
+        "last_used_at": None,
+        "last_used_ip": None,
+    }
+    await db.api_keys.insert_one(doc)
+    return doc
+
+
+async def _ensure_bootstrap_license(product: dict) -> dict:
+    """Ensure a per-product bootstrap demo license exists. Creates lazily."""
     from crypto_core import generate_hmac_license, generate_rsa_license
 
-    key_rec = await _bootstrap_key_record()
-    if not key_rec:
-        raw = "wnk_" + secrets.token_urlsafe(32)
-        doc = {
-            "id": str(uuid.uuid4()),
-            "name": "WatchNexus App Suite (bootstrap)",
-            "product_id": None,
-            "scopes": ["activate", "validate", "deactivate"],
-            "allowed_ips": [],
-            "key": raw,
-            "is_bootstrap": True,
-            "status": "active",
-            "created_at": now_iso(),
-            "last_used_at": None,
-            "last_used_ip": None,
-        }
-        await db.api_keys.insert_one(doc)
-        key_rec = doc
+    existing = await _bootstrap_license_for_product(product["id"])
+    if existing:
+        return existing
 
-    lic_rec = await _bootstrap_license_record()
-    if not lic_rec:
-        product = (await db.products.find_one({"slug": "watchnexus-pro"}, {"_id": 0})
-                   or await db.products.find_one({}, {"_id": 0}, sort=[("created_at", 1)]))
-        if product:
-            license_id = str(uuid.uuid4())
-            if product["signing_method"] == "rsa":
-                lic_key = generate_rsa_license(license_id, product["slug"])
-            else:
-                lic_key = generate_hmac_license(
-                    license_id, product["slug"],
-                    os.environ.get("HMAC_LICENSE_SECRET", "dev").encode(),
-                )
-            lic_rec = {
-                "id": license_id,
-                "key": lic_key,
-                "product_id": product["id"],
-                "product_slug": product["slug"],
-                "signing_method": product["signing_method"],
-                "fingerprint_mode": product["fingerprint_mode"],
-                "customer_email": None,
-                "customer_id": None,
-                "plan": "demo",
-                "seats": 3,
-                "expires_at": None,
-                "notes": "Demo license auto-generated for the quickstart.",
-                "status": "active",
-                "source": "bootstrap",
-                "is_bootstrap": True,
-                "created_at": now_iso(),
-                "updated_at": now_iso(),
-            }
-            await db.licenses.insert_one(lic_rec)
-    return key_rec, lic_rec
+    license_id = str(uuid.uuid4())
+    if product["signing_method"] == "rsa":
+        lic_key = generate_rsa_license(license_id, product["slug"])
+    else:
+        lic_key = generate_hmac_license(
+            license_id, product["slug"],
+            os.environ.get("HMAC_LICENSE_SECRET", "dev").encode(),
+        )
+    doc = {
+        "id": license_id,
+        "key": lic_key,
+        "product_id": product["id"],
+        "product_slug": product["slug"],
+        "signing_method": product["signing_method"],
+        "fingerprint_mode": product["fingerprint_mode"],
+        "customer_email": None,
+        "customer_id": None,
+        "plan": "demo",
+        "seats": max(3, product.get("max_seats_default", 1)),
+        "expires_at": None,
+        "notes": f"Demo license for product '{product['slug']}', auto-generated for the Quickstart.",
+        "status": "active",
+        "source": "bootstrap",
+        "is_bootstrap": True,
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+    await db.licenses.insert_one(doc)
+    return doc
+
+
+async def _resolve_product(product_id: Optional[str]) -> dict | None:
+    if product_id:
+        p = await db.products.find_one({"id": product_id}, {"_id": 0})
+        if p:
+            return p
+    # Fallback to first product (oldest) - the typical "watchnexus-pro"
+    return await db.products.find_one({}, {"_id": 0}, sort=[("created_at", 1)])
 
 
 @router.get("")
-async def quickstart_info(request: Request, admin=Depends(get_current_admin)):
-    key_rec, lic_rec = await _ensure_bootstrap_kit()
+async def quickstart_info(request: Request,
+                          product_id: Optional[str] = None,
+                          admin=Depends(get_current_admin)):
+    key_rec = await _ensure_bootstrap_key()
+    product = await _resolve_product(product_id)
+    lic_rec = await _ensure_bootstrap_license(product) if product else None
+
+    products = await db.products.find({}, {"_id": 0}).sort("created_at", 1).to_list(200)
     base = _public_base_url(request)
+
     return {
         "base_url": base,
         "api_key": key_rec["key"],
         "api_key_id": key_rec["id"],
         "api_key_name": key_rec["name"],
         "api_key_allowed_ips": key_rec.get("allowed_ips", []),
+        "selected_product_id": product["id"] if product else None,
+        "products": [
+            {
+                "id": p["id"], "name": p["name"], "slug": p["slug"],
+                "signing_method": p["signing_method"],
+                "fingerprint_mode": p["fingerprint_mode"],
+                "max_seats_default": p.get("max_seats_default", 1),
+            } for p in products
+        ],
         "demo_license": serialize_doc(lic_rec) if lic_rec else None,
         "endpoints": {
             "activate":   f"{base}/api/integrate/activate",
@@ -153,6 +185,7 @@ async def rotate_key(admin=Depends(get_current_admin)):
 
 
 class TestRunIn(BaseModel):
+    product_id: Optional[str] = None
     license_key: Optional[str] = None
     hardware_id: Optional[str] = "01:23:45:67:89:AB"
     domain: Optional[str] = "quickstart.example.com"
@@ -161,39 +194,41 @@ class TestRunIn(BaseModel):
 
 @router.post("/test")
 async def test_run(body: TestRunIn, request: Request, admin=Depends(get_current_admin)):
-    """Run a real activate -> validate -> deactivate cycle against the live
-    integrate endpoints using the bootstrap key. Returns each step's
-    response so the admin can see the actual shape of the API."""
-    key_rec, lic_rec = await _ensure_bootstrap_kit()
-    license_key = body.license_key or (lic_rec or {}).get("key")
-    if not license_key:
-        raise HTTPException(400, "No license key available. Create a license first.")
+    """Run a real activate -> validate -> deactivate cycle using the
+    bootstrap key against the selected product's demo license."""
+    await _ensure_bootstrap_key()
 
-    # Resolve license + verify signature (inline; not via HTTP)
-    lic = await db.licenses.find_one({"key": license_key}, {"_id": 0})
-    if not lic:
-        raise HTTPException(400, "License key not found")
-    if lic["signing_method"] == "rsa":
-        ok = verify_rsa_license(license_key)
+    if body.license_key:
+        lic = await db.licenses.find_one({"key": body.license_key}, {"_id": 0})
     else:
-        ok = verify_hmac_license(license_key, os.environ.get("HMAC_LICENSE_SECRET", "dev").encode())
+        product = await _resolve_product(body.product_id)
+        if not product:
+            raise HTTPException(400, "No product available to test against. Create one first.")
+        lic = await _ensure_bootstrap_license(product)
+
+    if not lic:
+        raise HTTPException(400, "License not found")
+
+    # Verify signature inline
+    if lic["signing_method"] == "rsa":
+        ok = verify_rsa_license(lic["key"])
+    else:
+        ok = verify_hmac_license(lic["key"],
+                                 os.environ.get("HMAC_LICENSE_SECRET", "dev").encode())
     if not ok:
         raise HTTPException(400, "License signature invalid")
 
     steps = []
-
-    # Use a unique fingerprint per test run to avoid colliding with prior tests
     hw = (body.hardware_id or "01:23:45:67:89:AB") + ":" + secrets.token_hex(2)
     fp = compute_fingerprint(lic["fingerprint_mode"], hw, body.domain)
 
-    # Seat check
+    # Seat recycle for repeated tests
     active_count = await db.activations.count_documents(
         {"license_id": lic["id"], "status": "active"})
     if active_count >= lic["seats"]:
-        # Free the oldest test activation to make room
         oldest = await db.activations.find_one(
             {"license_id": lic["id"], "status": "active",
-             "device_name": {"$regex": "^Quickstart"}},
+             "source": "quickstart_test"},
             sort=[("created_at", 1)],
         )
         if oldest:
@@ -264,11 +299,15 @@ async def test_run(body: TestRunIn, request: Request, admin=Depends(get_current_
     })
 
     await audit_log("admin", admin["id"], admin["email"], "quickstart.test_run",
-                    severity="info", meta={"license_id": lic["id"]})
+                    "license", lic["id"], severity="info",
+                    meta={"product": lic["product_slug"], "steps": 3,
+                          "fingerprint": fp[:16]},
+                    ip=request.client.host if request.client else None)
 
     return {
         "ok": True,
-        "license_key": license_key,
+        "license_key": lic["key"],
+        "product_slug": lic["product_slug"],
         "fingerprint": fp,
         "steps": steps,
     }

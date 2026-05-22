@@ -46,10 +46,39 @@ await client.deactivate(token);
 
 Same offline-grace behaviour as the Python client.
 
-## .NET / C#
+## .NET / C# (`/csharp`)
 
-A full minimal client is shown on the **Quickstart** page in the admin panel
-(`/admin/quickstart` -> `.NET / C#` tab). Copy/paste it into your project.
+Target framework: **.NET 6.0+** (recommended .NET 8). No NuGet packages required beyond what ships with .NET 6+.
+
+```bash
+# Drop the file into your project:
+cp /app/clients/csharp/WatchNexusClient.cs your-app/
+
+# Or try the example as-is:
+cd /app/clients/csharp
+dotnet run --project Example.csproj
+```
+
+```csharp
+using WatchNexus;
+
+using var client = new WatchNexusClient(
+    baseUrl: "https://licenses.example.com",
+    apiKey:  "wnk_...",
+    licenseKey: "WNX-...");
+
+var token = await client.ActivateAsync(new ActivateRequest {
+    HardwareId = "01:23:45:67:89:AB",
+    Domain     = "customer.example.com",
+    DeviceName = "Marie's Surface",
+});
+
+var state = await client.ValidateAsync(token);
+// state.Mode = "online" | "grace" | "grace_offline" | ...
+await client.DeactivateAsync(token);
+```
+
+Same offline-grace behaviour as the Python/JS clients (returns `mode = "grace_offline"` if the network is unreachable and the local JWT is still within `grace_until`).
 
 ## Where do I get my API key?
 

@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react';
 import { adminApi } from '../lib/api';
 import { Button } from '../components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Skeleton } from '../components/ui/skeleton';
 import { CodeBlock } from '../components/CodeBlock';
 import { CopyChip } from '../components/CopyChip';
 import {
-  Zap, RotateCcw, PlayCircle, CheckCircle2, AlertTriangle, Sparkles, Download,
+  Zap, RotateCcw, PlayCircle, CheckCircle2, AlertTriangle, Sparkles, Package,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -100,34 +101,28 @@ console.log(await validate(res.activation_token,
             { hardware_id: "${info.fingerprint_sample.hardware_id}",
               domain:      "${info.fingerprint_sample.domain}" }));`;
 
-const buildDotnet = (info) => `// .NET 6+ / C#
-using System.Net.Http;
-using System.Net.Http.Json;
-using System.Text.Json;
+const buildDotnet = (info) => `// .NET 6.0+ / C# - drop-in client at /app/clients/csharp/WatchNexusClient.cs
+// Copy that file into your project, then:
+using WatchNexus;
 
-public class WatchNexusClient
-{
-    private const string BaseUrl = "${info.base_url}";
-    private const string ApiKey  = "${info.api_key}";
-    private readonly HttpClient _http = new();
+using var client = new WatchNexusClient(
+    baseUrl:    "${info.base_url}",
+    apiKey:     "${info.api_key}",
+    licenseKey: "${info.demo_license?.key || 'WNX-REPLACE_ME'}");
 
-    public WatchNexusClient()
-    {
-        _http.DefaultRequestHeaders.Add("X-API-Key", ApiKey);
-    }
+var token = await client.ActivateAsync(new ActivateRequest {
+    HardwareId = "${info.fingerprint_sample.hardware_id}",
+    Domain     = "${info.fingerprint_sample.domain}",
+    DeviceName = "${info.fingerprint_sample.device_name}",
+});
+Console.WriteLine($"activated: {token.ActivationId}");
 
-    public record ActivateReq(string license_key, string? hardware_id,
-                              string? domain, string? device_name);
-    public record ActivateRes(string activation_id, string activation_token,
-                              long expires_at, long grace_until);
+var state = await client.ValidateAsync(token,
+    hardwareId: "${info.fingerprint_sample.hardware_id}",
+    domain:     "${info.fingerprint_sample.domain}");
+Console.WriteLine($"valid={state.Valid} mode={state.Mode}");
 
-    public async Task<ActivateRes?> Activate(ActivateReq req)
-    {
-        var r = await _http.PostAsJsonAsync($"{BaseUrl}/api/integrate/activate", req);
-        r.EnsureSuccessStatusCode();
-        return await r.Content.ReadFromJsonAsync<ActivateRes>();
-    }
-}`;
+await client.DeactivateAsync(token);`;
 
 const buildClientLib = (info) => `# Drop-in Python client (also at /app/clients/python/watchnexus_client.py)
 from watchnexus_client import WatchNexusClient
@@ -167,12 +162,15 @@ export default function AdminQuickstart() {
   const [rotating, setRotating] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
+  const [productId, setProductId] = useState(null);
 
-  const load = async () => {
+  const load = async (pid) => {
     setLoading(true);
     try {
-      const r = await adminApi.get('/admin/quickstart');
+      const params = pid ? { product_id: pid } : {};
+      const r = await adminApi.get('/admin/quickstart', { params });
       setInfo(r.data);
+      setProductId(r.data.selected_product_id);
     } catch (e) {
       toast.error('Failed to load quickstart info');
     } finally {
@@ -181,13 +179,19 @@ export default function AdminQuickstart() {
   };
   useEffect(() => { load(); }, []);
 
+  const onProductChange = (pid) => {
+    setProductId(pid);
+    setTestResult(null);
+    load(pid);
+  };
+
   const rotate = async () => {
     if (!window.confirm('Rotate the bootstrap API key? The current key will be revoked immediately and any client still using it will start failing.')) return;
     setRotating(true);
     try {
       await adminApi.post('/admin/quickstart/rotate-key');
       toast.success('Bootstrap key rotated');
-      load();
+      load(productId);
       setTestResult(null);
     } catch (e) {
       toast.error('Rotation failed');
@@ -200,7 +204,8 @@ export default function AdminQuickstart() {
     setTesting(true);
     setTestResult(null);
     try {
-      const r = await adminApi.post('/admin/quickstart/test', {});
+      const r = await adminApi.post('/admin/quickstart/test',
+        productId ? { product_id: productId } : {});
       setTestResult(r.data);
       toast.success('Live integration test passed');
     } catch (e) {
@@ -234,15 +239,35 @@ export default function AdminQuickstart() {
             into your code, hit run, and your software is talking to this license server.
           </p>
         </div>
-        <Button
-          variant="secondary"
-          onClick={rotate}
-          disabled={rotating}
-          data-testid="quickstart-rotate-key-button"
-        >
-          <RotateCcw className={`h-4 w-4 mr-1.5 ${rotating ? 'animate-spin' : ''}`} />
-          {rotating ? 'Rotating…' : 'Rotate bootstrap key'}
-        </Button>
+        <div className="flex items-center gap-2">
+          {info.products?.length > 0 && (
+            <div className="flex items-center gap-2" data-testid="quickstart-product-picker-wrap">
+              <Package className="h-3.5 w-3.5 text-muted-foreground" />
+              <Select value={productId || ''} onValueChange={onProductChange}>
+                <SelectTrigger className="w-56" data-testid="quickstart-product-picker">
+                  <SelectValue placeholder="Choose a product" />
+                </SelectTrigger>
+                <SelectContent>
+                  {info.products.map((p) => (
+                    <SelectItem key={p.id} value={p.id} data-testid={`quickstart-product-option-${p.slug}`}>
+                      {p.name}
+                      <span className="text-muted-foreground text-[10px] ml-1.5 font-mono">({p.signing_method})</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          <Button
+            variant="secondary"
+            onClick={rotate}
+            disabled={rotating}
+            data-testid="quickstart-rotate-key-button"
+          >
+            <RotateCcw className={`h-4 w-4 mr-1.5 ${rotating ? 'animate-spin' : ''}`} />
+            {rotating ? 'Rotating…' : 'Rotate bootstrap key'}
+          </Button>
+        </div>
       </div>
 
       {/* The kit */}
@@ -276,7 +301,10 @@ export default function AdminQuickstart() {
           <div className="flex items-center justify-between mb-3">
             <div>
               <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Demo license</div>
-              <div className="text-sm text-muted-foreground mt-1">3 seats, no expiry. Safe to use for development.</div>
+              <div className="text-sm text-muted-foreground mt-1">
+                {info.demo_license.seats} seats, no expiry &middot; <span className="font-mono uppercase">{info.demo_license.signing_method}</span> &middot; fingerprint:{' '}
+                <span className="font-mono">{info.demo_license.fingerprint_mode}</span>
+              </div>
             </div>
             <span className="rounded-md bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider text-emerald-300">{info.demo_license.product_slug}</span>
           </div>
