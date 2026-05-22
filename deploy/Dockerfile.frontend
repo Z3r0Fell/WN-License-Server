@@ -3,28 +3,31 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 
-# yarn.lock is optional - putting it in the SAME COPY as package.json (which
-# always exists) makes the wildcard safe in BuildKit. If yarn.lock is present
-# we'll use --frozen-lockfile; if not, we install fresh.
-COPY frontend/package.json frontend/yarn.lock* ./
+# Copy the whole frontend in one shot. We deliberately avoid wildcard COPYs
+# (e.g. `COPY frontend/yarn.lock* ./`) because BuildKit's handling of
+# zero-match wildcards is unreliable across versions and has been the cause
+# of every "failed to compute cache key" error we've hit during deploy.
+COPY frontend/ ./
 
+# If yarn.lock was committed, use --frozen-lockfile for reproducible builds.
+# If not (common when the repo was pushed without a lockfile), do a fresh
+# install which will generate yarn.lock inside the image.
 RUN if [ -f yarn.lock ]; then \
-        echo "Using yarn.lock - frozen install"; \
+        echo ">> yarn.lock present - frozen install"; \
         yarn install --frozen-lockfile --network-timeout 600000; \
     else \
-        echo "No yarn.lock found - regenerating (this is slower; commit yarn.lock for faster builds)"; \
+        echo ">> yarn.lock missing - regenerating (slower; commit yarn.lock for faster builds)"; \
         yarn install --network-timeout 600000; \
     fi
 
-COPY frontend/ ./
-
-# Build-time env baked into the bundle
+# Build-time env baked into the bundle.
 ARG REACT_APP_BACKEND_URL=""
 ARG REACT_APP_CUSTOMER_PORTAL_HOST=""
 ENV REACT_APP_BACKEND_URL=$REACT_APP_BACKEND_URL
 ENV REACT_APP_CUSTOMER_PORTAL_HOST=$REACT_APP_CUSTOMER_PORTAL_HOST
 RUN yarn build
 
+# ---- Runtime image ----------------------------------------------------------
 FROM nginx:1.27-alpine
 COPY --from=build /app/build /usr/share/nginx/html
 COPY deploy/nginx/site.conf /etc/nginx/conf.d/default.conf
