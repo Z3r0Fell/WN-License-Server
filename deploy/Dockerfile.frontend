@@ -3,8 +3,20 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 
-COPY frontend/package.json frontend/yarn.lock ./
-RUN yarn install --frozen-lockfile --network-timeout 600000
+# yarn.lock is optional - the trailing * + the shell `if` below let us build
+# even when the repo was pushed without a lockfile. With a lockfile we use
+# --frozen-lockfile for reproducible builds; without one, we install fresh
+# (slower, but functional).
+COPY frontend/package.json ./
+COPY frontend/yarn.lock* ./
+
+RUN if [ -f yarn.lock ]; then \
+        echo "Using yarn.lock - frozen install"; \
+        yarn install --frozen-lockfile --network-timeout 600000; \
+    else \
+        echo "No yarn.lock found - regenerating (this is slower; commit yarn.lock for faster builds)"; \
+        yarn install --network-timeout 600000; \
+    fi
 
 COPY frontend/ ./
 
