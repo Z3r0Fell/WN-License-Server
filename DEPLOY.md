@@ -6,6 +6,7 @@
 >
 > **Stack:** Docker Compose · MongoDB · FastAPI · React (built static) · nginx · Let's Encrypt.
 > **Tested on:** Ubuntu 22.04 LTS & 24.04 LTS, fresh VPS.
+> **This guide assumes:** VPS public IP `74.208.48.129` and repo `https://github.com/Z3r0Fell/WN-License-Server` (substitute your own if different).
 
 ---
 
@@ -15,7 +16,7 @@ WatchNexus serves **one backend** and **one React build**, but uses two public h
 
 - Customers never see the admin URL.
 - Each domain gets its own TLS certificate.
-- You can lock the admin domain behind a corporate VPN / Cloudflare Access later without breaking customer logins.
+- You can lock the admin domain behind Cloudflare Access / a VPN later without breaking customer logins.
 
 The React SPA looks at `window.location.hostname` at runtime to decide which set of routes to show:
 
@@ -34,36 +35,56 @@ You can use **any** two hostnames — just pass them on the installer command li
 You'll need:
 
 1. **An Ubuntu 22.04 or 24.04 VPS** with `sudo` / root SSH access.
+   - This guide uses VPS IP `74.208.48.129` — substitute yours.
 2. **A domain you control** (e.g. `watchnexus.ca`).
 3. **Two DNS A records**, both pointing at the VPS's public IPv4 address:
 
-   | Type | Name      | Value             | TTL  |
-   |------|-----------|-------------------|------|
-   | A    | `licenses`| `YOUR.VPS.IP.HERE`| 300  |
-   | A    | `techhub` | `YOUR.VPS.IP.HERE`| 300  |
+   | Type | Name      | Value             | TTL |
+   |------|-----------|-------------------|-----|
+   | A    | `licenses`| `74.208.48.129`   | 300 |
+   | A    | `techhub` | `74.208.48.129`   | 300 |
 
-   (If you use Cloudflare, set the proxy status to **DNS only** — the grey cloud — during initial TLS issuance.)
+   (If you use Cloudflare, set the proxy status to **DNS only** — the grey cloud — during initial TLS issuance. You can re-enable proxying after both certs are live.)
+
 4. **Confirm DNS resolves before continuing:**
+
    ```bash
    dig +short licenses.watchnexus.ca
    dig +short techhub.watchnexus.ca
    ```
-   Both must return your VPS IP. If they don't, wait a few minutes and check again.
-5. **The contents of this repo on the VPS.** Easiest path:
-   ```bash
-   # from your laptop:
-   rsync -av --exclude node_modules --exclude __pycache__ --exclude .git \
-         ./  root@YOUR_VPS_IP:/opt/_watchnexus_src/
-   ```
+
+   Both must return `74.208.48.129`. If they don't, wait a few minutes and retry. **Don't skip this** — the most common installer failure is Let's Encrypt failing because DNS isn't ready yet.
 
 ---
 
 ## 2. One-command install (recommended)
 
-```bash
-ssh root@YOUR_VPS_IP
+This is the path you should use. Two terminal commands total on the VPS.
 
-sudo bash /opt/_watchnexus_src/deploy/install.sh \
+### 2.1 SSH to the VPS
+
+```bash
+ssh root@74.208.48.129
+```
+
+(If you log in as a non-root user, prefix everything below with `sudo`.)
+
+### 2.2 Install git (it might already be there) and clone the repo
+
+```bash
+apt-get update -y && apt-get install -y git
+git clone https://github.com/Z3r0Fell/WN-License-Server.git /opt/watchnexus
+```
+
+> Already cloned earlier? Update to latest instead:
+> ```bash
+> cd /opt/watchnexus && git pull
+> ```
+
+### 2.3 Run the installer
+
+```bash
+sudo bash /opt/watchnexus/deploy/install.sh \
     --admin-domain    licenses.watchnexus.ca \
     --customer-domain techhub.watchnexus.ca  \
     --email           you@watchnexus.ca
@@ -75,7 +96,7 @@ It performs:
 
 1. Installs Docker CE + the Compose plugin.
 2. Configures UFW (only ports 22, 80, 443 open).
-3. Copies the repo to `/opt/watchnexus` (rsync, no node_modules).
+3. Skips the file-copy step (you're already in `/opt/watchnexus`).
 4. Generates strong `JWT_SECRET`, `HMAC_LICENSE_SECRET`, and a random `SEED_ADMIN_PASSWORD`.
 5. Writes a dual-domain Nginx config from the template.
 6. Requests two Let's Encrypt certificates (`certbot/certbot` standalone), one per hostname.
@@ -84,7 +105,7 @@ It performs:
    - **Daily MongoDB backup** at 03:00 UTC (14-day retention).
    - **TLS cert renewal** (`certbot renew`, twice daily).
 
-At the end the script prints:
+At the end the script prints something like:
 
 ```
 Admin URL    :  https://licenses.watchnexus.ca
@@ -96,68 +117,72 @@ Seeded admin :
   password   :  <random hex you should save>
 ```
 
-**Save the printed admin credentials.** They are not stored anywhere else in plaintext.
+⚠️ **Save the printed admin credentials.** They are not stored anywhere else in plaintext.
 
-### Re-running the installer
+### 2.4 Quick verification
 
 ```bash
-sudo bash /opt/watchnexus/deploy/install.sh \
-    --admin-domain    licenses.watchnexus.ca \
-    --customer-domain techhub.watchnexus.ca  \
-    --email           you@watchnexus.ca
+curl -i https://licenses.watchnexus.ca/api/health
+# -> HTTP/2 200 ... {"status":"ok","service":"watchnexus-license"}
 ```
 
-- Existing certs are **kept** (`certonly` skips if `/etc/letsencrypt/live/<dom>` exists).
-- Existing secrets in `.env` are **kept** (only the `change-me` placeholders are replaced).
-- The Nginx config is **always rewritten** so changing domains is a single re-run.
+If you get `200`, you're done. Open the admin URL in a browser.
+
+### Re-running the installer (idempotent)
+
+Same command as 2.3. Specifically:
+
+- Existing TLS certs are **kept** (cert issuance is skipped if `/etc/letsencrypt/live/<domain>` exists).
+- Existing secrets in `.env` are **kept** (only `change-me` placeholders are replaced).
+- The Nginx config is **always rewritten** so swapping domains is a single re-run.
 
 ### What if DNS isn't ready yet?
 
-Pass `--skip-tls` to do everything except the cert issuance:
+Pass `--skip-tls` to do everything except cert issuance:
 
 ```bash
-sudo bash install.sh \
+sudo bash /opt/watchnexus/deploy/install.sh \
     --admin-domain    licenses.watchnexus.ca \
     --customer-domain techhub.watchnexus.ca  \
     --email           you@watchnexus.ca      \
     --skip-tls
 ```
 
-Then later, once DNS propagates, drop the flag and re-run.
+Then later, once `dig` shows the VPS IP for both names, drop the flag and re-run.
 
 ---
 
 ## 3. First-login checklist
 
 1. Visit **`https://licenses.watchnexus.ca/admin/login`**.
-2. Sign in with the emails/password printed by the installer.
-3. Open **Settings** (admin sidebar) and paste in your live secrets — these are stored in MongoDB and override any `.env` values **without** a restart:
+2. Sign in with the email + password printed by the installer.
+3. Open **Settings** (admin sidebar) and paste in your live secrets — these are stored in MongoDB and override any `.env` values **without** a backend restart:
    - Stripe webhook secret
    - Lemon Squeezy / Paddle / Gumroad webhook secrets (if used)
    - SendGrid API key (or SMTP host/port/user/pass)
    - Default "from" email + brand name
 4. Open **Quickstart** → copy the **bootstrap API key**, then:
-   - Create your first **Product** (pick HMAC or RSA signing, choose fingerprint mode).
+   - Create your first **Product** (HMAC or RSA signing, fingerprint mode).
    - Issue a **License** to yourself for end-to-end testing.
 5. Visit **`https://techhub.watchnexus.ca/portal/login`** as the customer to confirm the portal works.
 6. Wire your payment provider webhooks to the admin domain:
 
-   | Provider       | URL                                                           | Settings field         |
-   |----------------|---------------------------------------------------------------|------------------------|
-   | Stripe         | `https://licenses.watchnexus.ca/api/webhooks/stripe`          | `stripe_webhook_secret`|
-   | Lemon Squeezy  | `https://licenses.watchnexus.ca/api/webhooks/lemonsqueezy`    | `lemonsqueezy_webhook_secret` |
-   | Paddle         | `https://licenses.watchnexus.ca/api/webhooks/paddle`          | `paddle_webhook_secret`|
-   | Gumroad        | `https://licenses.watchnexus.ca/api/webhooks/gumroad`         | `gumroad_webhook_secret`|
+   | Provider       | URL                                                           | Settings field                  |
+   |----------------|---------------------------------------------------------------|---------------------------------|
+   | Stripe         | `https://licenses.watchnexus.ca/api/webhooks/stripe`          | `stripe_webhook_secret`         |
+   | Lemon Squeezy  | `https://licenses.watchnexus.ca/api/webhooks/lemonsqueezy`    | `lemonsqueezy_webhook_secret`   |
+   | Paddle         | `https://licenses.watchnexus.ca/api/webhooks/paddle`          | `paddle_webhook_secret`         |
+   | Gumroad        | `https://licenses.watchnexus.ca/api/webhooks/gumroad`         | `gumroad_webhook_secret`        |
 
 ---
 
 ## 4. Manual install (if you prefer to see every step)
 
-### 4.1 Install Docker
+### 4.1 Install Docker + git
 
 ```bash
 apt-get update -y
-apt-get install -y ca-certificates curl gnupg ufw rsync openssl
+apt-get install -y ca-certificates curl gnupg ufw rsync openssl git
 
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
@@ -180,12 +205,11 @@ ufw allow 443/tcp
 ufw --force enable
 ```
 
-### 4.3 Copy the repo
+### 4.3 Clone the repo
 
 ```bash
-mkdir -p /opt/watchnexus
-# from your laptop, in another terminal:
-rsync -av --exclude node_modules --exclude __pycache__ ./ root@YOUR_VPS_IP:/opt/watchnexus/
+git clone https://github.com/Z3r0Fell/WN-License-Server.git /opt/watchnexus
+cd /opt/watchnexus
 ```
 
 ### 4.4 Configure `.env`
@@ -216,7 +240,9 @@ REACT_APP_CUSTOMER_PORTAL_HOST=techhub.watchnexus.ca
 CORS_ORIGINS=https://licenses.watchnexus.ca,https://techhub.watchnexus.ca
 ```
 
-Webhook + email values can be left blank here and filled in later from the **Settings** UI (they live in MongoDB and override `.env`).
+(Generate the `openssl rand` values manually and paste them in — the `$(...)` syntax won't expand inside nano.)
+
+Webhook + email secrets can be left blank here and filled in later from the **Settings** UI (they live in MongoDB and override `.env`).
 
 ### 4.5 Render the Nginx config
 
@@ -285,11 +311,17 @@ docker compose restart backend
 ### 5.3 Update to a new version
 
 ```bash
-# From your laptop:
-rsync -av --exclude node_modules --exclude __pycache__ ./ root@YOUR_VPS_IP:/opt/watchnexus/
-# On the VPS:
-cd /opt/watchnexus/deploy && docker compose up -d --build
+ssh root@74.208.48.129
+cd /opt/watchnexus
+git pull
+cd deploy
+docker compose up -d --build
 ```
+
+> If you ever want to start clean from upstream and your local changes are throw-away:
+> ```bash
+> cd /opt/watchnexus && git fetch && git reset --hard origin/main
+> ```
 
 ### 5.4 Backups
 
@@ -392,16 +424,20 @@ For tighter control set an **IP allowlist** per API key under **Admin → API Ke
 
 | Symptom                                          | Fix                                                                                                                            |
 |--------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------|
+| `git: command not found`                         | `apt-get update -y && apt-get install -y git`                                                                                  |
+| `install.sh: No such file or directory`          | You haven't cloned the repo yet. Run the `git clone` step in §2.2 first.                                                       |
+| `Permission denied (publickey)` when cloning     | The repo is public — use the HTTPS URL `https://github.com/Z3r0Fell/WN-License-Server.git`, not the SSH `git@github.com:...` URL. |
+| `fatal: destination path '/opt/watchnexus' already exists` | Either delete it (`rm -rf /opt/watchnexus`) and re-clone, or update in place: `cd /opt/watchnexus && git pull`.        |
 | `dig` doesn't return your VPS IP                 | DNS hasn't propagated yet. Wait or check the A-record at your registrar. Use `--skip-tls` and re-run later.                    |
-| `502 Bad Gateway`                                | `docker compose ps` — make sure `backend` is healthy. `docker compose logs backend`.                                            |
-| Certbot fails ("Connection refused")             | Port 80 isn't open OR another nginx is bound to it. `ufw status`, then `lsof -i :80`.                                          |
-| Certbot fails ("DNS problem")                    | A-record wrong / not propagated. Fix DNS, re-run `install.sh` (idempotent).                                                    |
-| Customer portal shows admin login                | Hostname mismatch. Check `REACT_APP_CUSTOMER_PORTAL_HOST` in `.env` matches the actual customer DNS name, then rebuild `web`.   |
-| Webhook returns 401                              | Signing secret in **Admin → Settings** (or `.env`) doesn't match what the provider is sending.                                 |
+| Certbot fails ("Connection refused" on :80)      | Port 80 isn't open OR another service is bound to it. `ufw status`, then `lsof -i :80` / `ss -ltnp | grep :80`.                |
+| Certbot fails ("DNS problem" / "unauthorized")   | A-record wrong / not propagated. Fix DNS, re-run `install.sh` (idempotent).                                                    |
+| Certbot fails with rate-limit error              | You hit Let's Encrypt's 5-failures-per-hour rate limit by retrying too fast. Wait an hour, fix the real problem, then retry.   |
+| `502 Bad Gateway` in the browser                 | `docker compose ps` — make sure `backend` is healthy. `docker compose logs backend`.                                            |
+| Browser shows admin login on the customer domain | Hostname mismatch. Check `REACT_APP_CUSTOMER_PORTAL_HOST` in `.env` matches the customer DNS name, then `docker compose up -d --build web`. |
+| Webhook returns 401                              | Signing secret in **Admin → Settings** (or `.env`) doesn't match what the provider is sending. Update + retry.                 |
 | Lost admin password                              | Edit `SEED_ADMIN_PASSWORD` in `.env`, delete the admin row, restart backend: `docker compose exec mongo mongosh watchnexus --eval 'db.admin_users.deleteMany({})' && docker compose restart backend`. |
 | Want to rotate `JWT_SECRET`                      | Edit `.env`, `docker compose restart backend`. **All sessions and activation tokens become invalid immediately** — plan a window. |
-| Need to whitelist a callback IP                  | Admin → API Keys → ✏️ on the key → paste IP/CIDR.                                                                              |
-| One domain works, the other returns "no such host" or wrong cert | Re-run `install.sh` to regenerate Nginx config & request the missing cert.                                       |
+| One domain works, the other returns no host / wrong cert | Re-run `install.sh` to regenerate Nginx config + request the missing cert.                                              |
 
 ---
 
@@ -420,4 +456,4 @@ Backups in `/opt/watchnexus/deploy/backups/` are removed by the `rm -rf` above �
 
 ---
 
-That's it. Have fun shipping software. If something breaks, check `docker compose logs backend` first — 90% of issues are visible there.
+That's it. If something breaks, run `docker compose logs backend` first — 90% of issues are visible there.

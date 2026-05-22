@@ -91,7 +91,7 @@ banner "Step 1/7 - System packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 apt-get install -y --no-install-recommends \
-    ca-certificates curl gnupg lsb-release ufw rsync openssl jq
+    ca-certificates curl gnupg lsb-release ufw rsync openssl jq git
 
 # ---------- 2. docker ----------
 banner "Step 2/7 - Docker"
@@ -121,9 +121,19 @@ ufw status | head -n 10
 # ---------- 4. copy code ----------
 banner "Step 4/7 - Project files -> $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
-rsync -a --delete --exclude='node_modules' --exclude='__pycache__' --exclude='backups' \
-      --exclude='.git' --exclude='build' --exclude='*.pyc' \
-      "$SOURCE_DIR/" "$INSTALL_DIR/"
+
+# If we're already running from inside the install dir (typical `git clone`
+# straight to /opt/watchnexus flow), skip the rsync — copying a dir onto
+# itself with --delete is destructive.
+SRC_REAL="$(readlink -f "$SOURCE_DIR")"
+DST_REAL="$(readlink -f "$INSTALL_DIR")"
+if [[ "$SRC_REAL" == "$DST_REAL" ]]; then
+  green "  source and install dir are the same ($DST_REAL) — skipping rsync."
+else
+  rsync -a --delete --exclude='node_modules' --exclude='__pycache__' --exclude='backups' \
+        --exclude='.git' --exclude='build' --exclude='*.pyc' \
+        "$SOURCE_DIR/" "$INSTALL_DIR/"
+fi
 chmod +x "$INSTALL_DIR/backend/scripts/backup_mongo.sh" 2>/dev/null || true
 
 # ---------- 5. .env ----------
