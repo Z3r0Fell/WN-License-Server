@@ -1,507 +1,400 @@
 """
-Phase 6 Backend Testing - WatchNexus License Hub
-Regression + Runtime Settings Module Validation
-
-Tests:
-1. Health check
-2. Admin authentication
-3. Runtime settings GET (no secret leakage)
-4. Runtime settings PUT (live updates without restart)
-5. API keys CRUD + bootstrap key
-6. Full license lifecycle (create → activate → validate → revoke)
-7. Webhook signature verification using DB values
-8. Rate limiting
-9. Audit log mutations
+WatchNexus Admin Security Features Test Suite
+Tests: IP allowlist, audit filtering, TOTP 2FA full lifecycle
 """
 import requests
 import sys
 import time
-import hmac
-import hashlib
-import json
-from datetime import datetime
+import pyotp
+from typing import Optional
 
-BASE_URL = "https://watchnexus-deploy.preview.emergentagent.com"
+BASE_URL = "https://watchnexus-deploy.preview.emergentagent.com/api"
 ADMIN_EMAIL = "admin@watchnexus.app"
 ADMIN_PASSWORD = "admin12345"
 
-class Phase6Tester:
+
+class SecurityTester:
     def __init__(self):
-        self.base_url = BASE_URL
-        self.token = None
+        self.token: Optional[str] = None
         self.tests_run = 0
         self.tests_passed = 0
         self.tests_failed = 0
-        self.failed_tests = []
+        self.failures = []
+        self.totp_secret: Optional[str] = None
+        self.recovery_codes = []
 
-    def log(self, msg, status="info"):
+    def log(self, msg: str, level: str = "INFO"):
         prefix = {
-            "info": "ℹ️ ",
-            "success": "✅",
-            "fail": "❌",
-            "warn": "⚠️ "
-        }.get(status, "")
+            "INFO": "ℹ️ ",
+            "PASS": "✅",
+            "FAIL": "❌",
+            "WARN": "⚠️ ",
+        }.get(level, "  ")
         print(f"{prefix} {msg}")
 
-    def test(self, name, func):
-        """Run a test function and track results"""
+    def test(self, name: str, condition: bool, details: str = ""):
         self.tests_run += 1
-        self.log(f"\n{'='*60}", "info")
-        self.log(f"Test {self.tests_run}: {name}", "info")
-        self.log(f"{'='*60}", "info")
-        try:
-            func()
+        if condition:
             self.tests_passed += 1
-            self.log(f"PASSED: {name}", "success")
-            return True
-        except AssertionError as e:
+            self.log(f"PASS: {name}", "PASS")
+            if details:
+                print(f"     {details}")
+        else:
             self.tests_failed += 1
-            self.failed_tests.append({"name": name, "error": str(e)})
-            self.log(f"FAILED: {name} - {str(e)}", "fail")
-            return False
+            self.failures.append(f"{name}: {details}")
+            self.log(f"FAIL: {name} - {details}", "FAIL")
+
+    def login(self, email: str = ADMIN_EMAIL, password: str = ADMIN_PASSWORD) -> dict:
+        """Login and return response data"""
+        try:
+            r = requests.post(f"{BASE_URL}/admin/login", json={"email": email, "password": password}, timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                if "token" in data:
+                    self.token = data["token"]
+                return data
+            return {"status_code": r.status_code, "error": r.text}
         except Exception as e:
-            self.tests_failed += 1
-            self.failed_tests.append({"name": name, "error": f"Exception: {str(e)}"})
-            self.log(f"ERROR: {name} - {str(e)}", "fail")
-            return False
+            return {"error": str(e)}
 
     def headers(self):
         return {"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"}
 
-    # ==================== CORE TESTS ====================
-    def test_health_check(self):
-        """GET /api/health returns 200"""
-        r = requests.get(f"{self.base_url}/api/health")
-        assert r.status_code == 200, f"Health check failed: {r.status_code} {r.text}"
-        data = r.json()
-        assert data.get("status") == "ok", f"Health check returned status={data.get('status')}"
-        self.log("Health check passed", "success")
+    def get_me(self) -> dict:
+        """Get current admin user info"""
+        try:
+            r = requests.get(f"{BASE_URL}/admin/me", headers=self.headers(), timeout=10)
+            return r.json() if r.status_code == 200 else {}
+        except:
+            return {}
 
-    def test_admin_login(self):
-        """Admin login with seeded credentials returns JWT"""
-        self.log("Logging in as admin...", "info")
-        r = requests.post(f"{self.base_url}/api/admin/login", json={
-            "email": ADMIN_EMAIL,
-            "password": ADMIN_PASSWORD
-        })
-        assert r.status_code == 200, f"Login failed: {r.status_code} {r.text}"
-        data = r.json()
-        assert "token" in data, "No token in login response"
-        self.token = data["token"]
-        self.log("Admin login successful", "success")
+    # ==================== IP ALLOWLIST TESTS ====================
+    def test_ip_allowlist(self):
+        self.log("\n=== Testing IP Allowlist Feature ===", "INFO")
+        
+        # 1. Get current settings
+        r = requests.get(f"{BASE_URL}/admin/settings", headers=self.headers(), timeout=10)
+        self.test("GET /admin/settings returns 200", r.status_code == 200)
+        
+        if r.status_code == 200:
+            settings = r.json()
+            has_allowlist_key = "ADMIN_LOGIN_IP_ALLOWLIST" in settings
+            self.test("ADMIN_LOGIN_IP_ALLOWLIST key exists in settings", has_allowlist_key)
+            
+            if has_allowlist_key:
+                meta = settings["ADMIN_LOGIN_IP_ALLOWLIST"]
+                self.test("IP allowlist is in 'security' category", meta.get("category") == "security")
+                self.test("IP allowlist is not marked as secret", meta.get("secret") == False)
+                
+                # 2. Set IP allowlist to exclude current client (use a fake CIDR)
+                self.log("Setting IP allowlist to block login...", "INFO")
+                r = requests.put(
+                    f"{BASE_URL}/admin/settings",
+                    headers=self.headers(),
+                    json={"values": {"ADMIN_LOGIN_IP_ALLOWLIST": "192.0.2.0/24"}},  # TEST-NET-1, won't match real IPs
+                    timeout=10
+                )
+                self.test("PUT /admin/settings with IP allowlist returns 200", r.status_code == 200)
+                
+                # 3. Try to login - should get 403
+                time.sleep(0.5)  # Brief pause for settings to propagate
+                r = requests.post(f"{BASE_URL}/admin/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}, timeout=10)
+                self.test("Login with blocked IP returns 403", r.status_code == 403, f"Got {r.status_code}")
+                if r.status_code == 403:
+                    self.test("403 response mentions IP restriction", "IP" in r.text or "allowed" in r.text.lower())
+                
+                # 4. CRITICAL: Clear the IP allowlist to restore normal access
+                self.log("Clearing IP allowlist to restore access...", "WARN")
+                r = requests.put(
+                    f"{BASE_URL}/admin/settings",
+                    headers=self.headers(),
+                    json={"values": {"ADMIN_LOGIN_IP_ALLOWLIST": ""}},
+                    timeout=10
+                )
+                self.test("Clearing IP allowlist returns 200", r.status_code == 200)
+                
+                # 5. Verify login works again
+                time.sleep(0.5)
+                r = requests.post(f"{BASE_URL}/admin/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}, timeout=10)
+                self.test("Login after clearing IP allowlist returns 200", r.status_code == 200, f"Got {r.status_code}")
+                if r.status_code == 200:
+                    self.token = r.json().get("token")  # Refresh token
 
-    # ==================== RUNTIME SETTINGS TESTS ====================
-    def test_runtime_settings_get(self):
-        """GET /api/admin/settings returns settings without leaking raw secrets"""
-        r = requests.get(f"{self.base_url}/api/admin/settings", headers=self.headers())
-        assert r.status_code == 200, f"Settings GET failed: {r.status_code} {r.text}"
+    # ==================== AUDIT FILTERING TESTS ====================
+    def test_audit_filtering(self):
+        self.log("\n=== Testing Audit Log Filtering ===", "INFO")
         
-        data = r.json()
-        assert isinstance(data, dict), "Settings response is not a dict"
+        # 1. Get audit actors list
+        r = requests.get(f"{BASE_URL}/admin/audit/actors", headers=self.headers(), timeout=10)
+        self.test("GET /admin/audit/actors returns 200", r.status_code == 200)
         
-        # Check for expected webhook secrets
-        expected_keys = [
-            "STRIPE_WEBHOOK_SECRET",
-            "LEMONSQUEEZY_WEBHOOK_SECRET",
-            "PADDLE_WEBHOOK_SECRET",
-            "GUMROAD_WEBHOOK_SECRET",
-            "SENDGRID_API_KEY",
-            "EMAIL_FROM",
-            "APP_PUBLIC_URL"
-        ]
+        actors = []
+        if r.status_code == 200:
+            actors = r.json()
+            self.test("Audit actors list is an array", isinstance(actors, list))
+            if actors:
+                self.log(f"Found {len(actors)} distinct actors in audit log", "INFO")
         
-        for key in expected_keys:
-            assert key in data, f"Missing expected setting: {key}"
+        # 2. Get all audit events
+        r = requests.get(f"{BASE_URL}/admin/audit", headers=self.headers(), timeout=10)
+        self.test("GET /admin/audit returns 200", r.status_code == 200)
         
-        # Verify secrets are masked (not raw values)
-        stripe_setting = data["STRIPE_WEBHOOK_SECRET"]
-        assert stripe_setting.get("secret") == True, "STRIPE_WEBHOOK_SECRET not marked as secret"
-        assert "masked" in stripe_setting, "Secret doesn't have 'masked' field"
-        assert "value" not in stripe_setting, "Secret has raw 'value' field (should be masked)"
+        all_events = []
+        if r.status_code == 200:
+            all_events = r.json()
+            self.test("Audit events is an array", isinstance(all_events, list))
+            self.log(f"Total audit events: {len(all_events)}", "INFO")
         
-        # Verify non-secrets have values
-        email_setting = data["EMAIL_FROM"]
-        assert email_setting.get("secret") == False, "EMAIL_FROM incorrectly marked as secret"
-        assert "value" in email_setting, "Non-secret doesn't have 'value' field"
-        
-        self.log(f"Runtime settings GET verified: {len(data)} settings, secrets properly masked", "success")
-        return data
-
-    def test_runtime_settings_put_live_update(self):
-        """PUT /api/admin/settings updates setting and reflects immediately (no restart)"""
-        # Update STRIPE_WEBHOOK_SECRET to a test value
-        test_secret = f"whsec_test_{int(time.time())}"
-        
-        r = requests.put(
-            f"{self.base_url}/api/admin/settings",
+        # 3. Filter by actor_email (admin)
+        r = requests.get(
+            f"{BASE_URL}/admin/audit",
             headers=self.headers(),
-            json={"values": {"STRIPE_WEBHOOK_SECRET": test_secret}}
+            params={"actor_email": ADMIN_EMAIL},
+            timeout=10
         )
-        assert r.status_code == 200, f"Settings PUT failed: {r.status_code} {r.text}"
+        self.test("GET /admin/audit with actor_email filter returns 200", r.status_code == 200)
         
-        # Immediately read back (should reflect new value without restart)
-        r = requests.get(f"{self.base_url}/api/admin/settings", headers=self.headers())
-        assert r.status_code == 200, f"Settings GET after PUT failed: {r.status_code}"
+        if r.status_code == 200:
+            filtered = r.json()
+            self.test("Filtered events is an array", isinstance(filtered, list))
+            if filtered:
+                # Verify all returned events match the filter
+                all_match = all(ADMIN_EMAIL.lower() in (e.get("actor_email") or "").lower() for e in filtered)
+                self.test("All filtered events match actor_email", all_match)
         
-        data = r.json()
-        stripe_setting = data["STRIPE_WEBHOOK_SECRET"]
-        
-        # Verify it's now from DB (not env)
-        assert stripe_setting.get("source") == "db", f"Setting source should be 'db', got: {stripe_setting.get('source')}"
-        assert stripe_setting.get("has_value") == True, "Setting should have value"
-        
-        # Verify masked value shows part of our test secret
-        masked = stripe_setting.get("masked", "")
-        # Our test secret format: whsec_test_<timestamp>
-        # Should show first 4 chars: whse
-        assert "whse" in masked or len(masked) > 0, f"Masked value doesn't reflect update: {masked}"
-        
-        self.log(f"Runtime settings PUT verified: live update working (source=db)", "success")
-        return test_secret
-
-    # ==================== API KEYS TESTS ====================
-    def test_api_keys_list_and_bootstrap(self):
-        """Admin can list API keys and bootstrap key exists"""
-        r = requests.get(f"{self.base_url}/api/admin/api-keys", headers=self.headers())
-        assert r.status_code == 200, f"API keys list failed: {r.status_code} {r.text}"
-        
-        keys = r.json()
-        assert isinstance(keys, list), "API keys response is not a list"
-        assert len(keys) > 0, "No API keys found (bootstrap key should exist)"
-        
-        # Find bootstrap key
-        bootstrap = next((k for k in keys if k.get("is_bootstrap") == True), None)
-        assert bootstrap is not None, "Bootstrap API key not found"
-        assert bootstrap.get("status") == "active", "Bootstrap key not active"
-        
-        self.log(f"API keys list verified: {len(keys)} keys, bootstrap key present", "success")
-        return bootstrap
-
-    def test_api_keys_create_revoke(self):
-        """Admin can create and revoke API keys"""
-        # Create a new API key
-        r = requests.post(
-            f"{self.base_url}/api/admin/api-keys",
-            headers=self.headers(),
-            json={
-                "name": f"Test Key {int(time.time())}",
-                "scopes": ["activate", "validate"],
-                "allowed_ips": []
-            }
-        )
-        assert r.status_code == 200, f"API key creation failed: {r.status_code} {r.text}"
-        
-        new_key = r.json()
-        assert "id" in new_key, "No ID in created key"
-        assert "key" in new_key, "No key value in response"
-        assert new_key["key"].startswith("wnk_"), "Key doesn't have wnk_ prefix"
-        
-        key_id = new_key["id"]
-        self.log(f"API key created: {new_key['key'][:20]}...", "success")
-        
-        # Revoke the key
-        r = requests.post(
-            f"{self.base_url}/api/admin/api-keys/{key_id}/revoke",
-            headers=self.headers()
-        )
-        assert r.status_code == 200, f"API key revocation failed: {r.status_code} {r.text}"
-        
-        # Verify it's revoked
-        r = requests.get(f"{self.base_url}/api/admin/api-keys", headers=self.headers())
-        keys = r.json()
-        revoked_key = next((k for k in keys if k["id"] == key_id), None)
-        assert revoked_key is not None, "Revoked key not found in list"
-        assert revoked_key.get("status") == "revoked", "Key status not 'revoked'"
-        
-        self.log("API key create/revoke verified", "success")
-
-    # ==================== FULL LICENSE LIFECYCLE ====================
-    def test_full_license_lifecycle(self):
-        """Full license lifecycle: create product → license → activate → validate → revoke → validate fails"""
-        # Step 1: Create a test product
-        product_slug = f"test-product-{int(time.time())}"
-        r = requests.post(
-            f"{self.base_url}/api/admin/products",
-            headers=self.headers(),
-            json={
-                "name": f"Test Product {int(time.time())}",
-                "slug": product_slug,
-                "signing_method": "hmac",
-                "fingerprint_mode": "both",
-                "max_seats_default": 2
-            }
-        )
-        assert r.status_code == 200, f"Product creation failed: {r.status_code} {r.text}"
-        product = r.json()
-        product_id = product["id"]
-        self.log(f"Product created: {product_slug}", "success")
-        
-        # Step 2: Create a license for this product
-        r = requests.post(
-            f"{self.base_url}/api/admin/licenses",
-            headers=self.headers(),
-            json={
-                "product_id": product_id,
-                "plan": "pro",
-                "seats": 2,
-                "customer_email": "test@example.com"
-            }
-        )
-        assert r.status_code == 200, f"License creation failed: {r.status_code} {r.text}"
-        license_data = r.json()
-        license_key = license_data["key"]
-        license_id = license_data["id"]
-        self.log(f"License created: {license_key[:30]}...", "success")
-        
-        # Step 3: Get bootstrap API key for integration calls
-        r = requests.get(f"{self.base_url}/api/admin/quickstart", headers=self.headers())
-        assert r.status_code == 200, f"Quickstart failed: {r.status_code}"
-        api_key = r.json()["api_key"]
-        
-        # Step 4: Activate the license
-        hw_id = f"TEST-HW-{int(time.time())}"
-        r = requests.post(
-            f"{self.base_url}/api/integrate/activate",
-            headers={"X-API-Key": api_key, "Content-Type": "application/json"},
-            json={
-                "license_key": license_key,
-                "hardware_id": hw_id,
-                "domain": "test.example.com",
-                "device_name": "Test Device"
-            }
-        )
-        assert r.status_code == 200, f"Activation failed: {r.status_code} {r.text}"
-        activation_result = r.json()
-        assert "activation_token" in activation_result, "No activation_token in response"
-        activation_token = activation_result["activation_token"]
-        self.log("License activated successfully", "success")
-        
-        # Step 5: Validate the license (should be valid)
-        r = requests.post(
-            f"{self.base_url}/api/integrate/validate",
-            headers={"X-API-Key": api_key, "Content-Type": "application/json"},
-            json={
-                "activation_token": activation_token,
-                "hardware_id": hw_id,
-                "domain": "test.example.com"
-            }
-        )
-        assert r.status_code == 200, f"Validation failed: {r.status_code} {r.text}"
-        validation_result = r.json()
-        assert validation_result.get("valid") == True, "License should be valid"
-        self.log("License validation passed (valid)", "success")
-        
-        # Step 6: Revoke the license
-        r = requests.post(
-            f"{self.base_url}/api/admin/licenses/{license_id}/revoke",
-            headers=self.headers()
-        )
-        assert r.status_code == 200, f"License revocation failed: {r.status_code} {r.text}"
-        self.log("License revoked", "success")
-        
-        # Step 7: Validate again (should be invalid)
-        r = requests.post(
-            f"{self.base_url}/api/integrate/validate",
-            headers={"X-API-Key": api_key, "Content-Type": "application/json"},
-            json={
-                "activation_token": activation_token,
-                "hardware_id": hw_id,
-                "domain": "test.example.com"
-            }
-        )
-        assert r.status_code == 200, f"Validation request failed: {r.status_code} {r.text}"
-        validation_result = r.json()
-        assert validation_result.get("valid") == False, "License should be invalid after revocation"
-        self.log("License validation after revoke: invalid (correct)", "success")
-
-    # ==================== WEBHOOK SIGNATURE VERIFICATION ====================
-    def test_stripe_webhook_uses_db_secret(self):
-        """Stripe webhook verifies signature using DB value (not .env)"""
-        # First, set a known test secret via runtime settings
-        test_secret = f"whsec_stripe_test_{int(time.time())}"
-        r = requests.put(
-            f"{self.base_url}/api/admin/settings",
-            headers=self.headers(),
-            json={"values": {"STRIPE_WEBHOOK_SECRET": test_secret}}
-        )
-        assert r.status_code == 200, f"Settings update failed: {r.status_code}"
-        self.log(f"Set Stripe webhook secret to: {test_secret}", "info")
-        
-        # Create a test webhook payload
-        payload = {
-            "id": f"evt_test_{int(time.time())}",
-            "type": "checkout.session.completed",
-            "data": {"object": {"id": "cs_test"}}
-        }
-        payload_str = json.dumps(payload)
-        timestamp = str(int(time.time()))
-        
-        # Generate signature using our test secret
-        signed_payload = f"{timestamp}.{payload_str}"
-        signature = hmac.new(
-            test_secret.encode(),
-            signed_payload.encode(),
-            hashlib.sha256
-        ).hexdigest()
-        
-        stripe_signature = f"t={timestamp},v1={signature}"
-        
-        # Send webhook with correct signature
-        r = requests.post(
-            f"{self.base_url}/api/webhooks/stripe",
-            headers={
-                "Content-Type": "application/json",
-                "Stripe-Signature": stripe_signature
-            },
-            data=payload_str
-        )
-        
-        # Should not be 401 (signature verification passed)
-        # Might be 400 or 200 depending on payload processing
-        assert r.status_code != 401, f"Stripe webhook signature verification failed (401). Status: {r.status_code}"
-        self.log(f"Stripe webhook signature verification passed (status {r.status_code})", "success")
-
-    def test_lemonsqueezy_webhook_uses_db_secret(self):
-        """LemonSqueezy webhook verifies signature using DB value"""
-        # Set a known test secret
-        test_secret = f"ls_test_{int(time.time())}"
-        r = requests.put(
-            f"{self.base_url}/api/admin/settings",
-            headers=self.headers(),
-            json={"values": {"LEMONSQUEEZY_WEBHOOK_SECRET": test_secret}}
-        )
-        assert r.status_code == 200, f"Settings update failed: {r.status_code}"
-        self.log(f"Set LemonSqueezy webhook secret to: {test_secret}", "info")
-        
-        # Create test payload
-        payload = {
-            "meta": {
-                "event_name": "order_created",
-                "custom_data": {}
-            },
-            "data": {
-                "id": str(int(time.time())),
-                "type": "orders"
-            }
-        }
-        payload_str = json.dumps(payload)
-        
-        # Generate signature
-        signature = hmac.new(
-            test_secret.encode(),
-            payload_str.encode(),
-            hashlib.sha256
-        ).hexdigest()
-        
-        # Send webhook
-        r = requests.post(
-            f"{self.base_url}/api/webhooks/lemonsqueezy",
-            headers={
-                "Content-Type": "application/json",
-                "X-Signature": signature
-            },
-            data=payload_str
-        )
-        
-        # Should not be 401
-        assert r.status_code != 401, f"LemonSqueezy webhook signature verification failed (401). Status: {r.status_code}"
-        self.log(f"LemonSqueezy webhook signature verification passed (status {r.status_code})", "success")
-
-    # ==================== RATE LIMITING ====================
-    def test_rate_limit_admin_login(self):
-        """Rate limits apply: 429 after burst on /api/admin/login"""
-        self.log("Testing rate limit (10 requests in 60s for /api/admin/login)...", "info")
-        
-        # Make 11 login attempts rapidly (limit is 10/60s)
-        rate_limited = False
-        for i in range(12):
-            r = requests.post(
-                f"{self.base_url}/api/admin/login",
-                json={"email": "test@example.com", "password": "wrong"}
+        # 4. Filter by severity
+        for severity in ["info", "warning", "error"]:
+            r = requests.get(
+                f"{BASE_URL}/admin/audit",
+                headers=self.headers(),
+                params={"severity": severity},
+                timeout=10
             )
-            if r.status_code == 429:
-                rate_limited = True
-                self.log(f"Rate limited after {i+1} requests", "info")
-                break
-            time.sleep(0.1)
-        
-        assert rate_limited, "Rate limit not triggered after 12 requests"
-        self.log("Rate limiting working correctly", "success")
+            if r.status_code == 200:
+                filtered = r.json()
+                if filtered:
+                    all_match = all(e.get("severity") == severity for e in filtered)
+                    self.test(f"Severity filter '{severity}' works correctly", all_match)
+                else:
+                    self.log(f"No events with severity '{severity}'", "INFO")
 
-    # ==================== AUDIT LOG ====================
-    def test_audit_log_records_mutations(self):
-        """Audit log records mutations (creating a license, updating a setting)"""
-        # Get current audit count
-        r = requests.get(f"{self.base_url}/api/admin/audit", headers=self.headers())
-        assert r.status_code == 200, f"Audit log fetch failed: {r.status_code}"
-        initial_count = len(r.json())
+    # ==================== 2FA FULL LIFECYCLE TESTS ====================
+    def test_2fa_lifecycle(self):
+        self.log("\n=== Testing 2FA Full Lifecycle ===", "INFO")
         
-        # Perform a mutation: update a setting
-        r = requests.put(
-            f"{self.base_url}/api/admin/settings",
-            headers=self.headers(),
-            json={"values": {"EMAIL_FROM": f"test-{int(time.time())}@example.com"}}
-        )
-        assert r.status_code == 200, f"Settings update failed: {r.status_code}"
+        # 1. Enroll - get secret and QR
+        r = requests.post(f"{BASE_URL}/admin/me/2fa/enroll", headers=self.headers(), timeout=10)
+        self.test("POST /admin/me/2fa/enroll returns 200", r.status_code == 200)
         
-        # Check audit log increased
-        r = requests.get(f"{self.base_url}/api/admin/audit", headers=self.headers())
-        assert r.status_code == 200, f"Audit log fetch failed: {r.status_code}"
-        new_count = len(r.json())
-        
-        assert new_count > initial_count, f"Audit log didn't record mutation (count: {initial_count} -> {new_count})"
-        self.log(f"Audit log recording mutations (count: {initial_count} -> {new_count})", "success")
+        if r.status_code == 200:
+            enroll_data = r.json()
+            has_secret = "secret" in enroll_data
+            has_uri = "otpauth_uri" in enroll_data
+            has_qr = "qr_png_data_uri" in enroll_data
+            
+            self.test("Enroll response has 'secret'", has_secret)
+            self.test("Enroll response has 'otpauth_uri'", has_uri)
+            self.test("Enroll response has 'qr_png_data_uri'", has_qr)
+            
+            if has_qr:
+                qr_data = enroll_data["qr_png_data_uri"]
+                self.test("QR data is a data URI", qr_data.startswith("data:image/png;base64,"))
+            
+            if has_secret:
+                self.totp_secret = enroll_data["secret"]
+                self.log(f"Got TOTP secret: {self.totp_secret[:8]}...", "INFO")
+                
+                # 2. Verify with a live TOTP code
+                totp = pyotp.TOTP(self.totp_secret)
+                code = totp.now()
+                self.log(f"Generated TOTP code: {code}", "INFO")
+                
+                r = requests.post(
+                    f"{BASE_URL}/admin/me/2fa/verify",
+                    headers=self.headers(),
+                    json={"secret": self.totp_secret, "code": code, "current_password": ADMIN_PASSWORD},
+                    timeout=10
+                )
+                self.test("POST /admin/me/2fa/verify with valid code returns 200", r.status_code == 200, f"Got {r.status_code}")
+                
+                if r.status_code == 200:
+                    verify_data = r.json()
+                    has_recovery = "recovery_codes" in verify_data
+                    self.test("Verify response has 'recovery_codes'", has_recovery)
+                    
+                    if has_recovery:
+                        self.recovery_codes = verify_data["recovery_codes"]
+                        self.test("Got 10 recovery codes", len(self.recovery_codes) == 10)
+                        if self.recovery_codes:
+                            self.log(f"Sample recovery code: {self.recovery_codes[0]}", "INFO")
+                    
+                    # 3. Verify 2FA is now enabled
+                    me = self.get_me()
+                    self.test("User totp_enabled is True", me.get("totp_enabled") == True)
+                    self.test("User has 10 recovery codes", me.get("recovery_codes_remaining") == 10)
+                    
+                    # 4. Test login now requires 2FA
+                    self.log("Testing login with 2FA enabled...", "INFO")
+                    r = requests.post(f"{BASE_URL}/admin/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}, timeout=10)
+                    self.test("Login with 2FA enabled returns 200", r.status_code == 200)
+                    
+                    if r.status_code == 200:
+                        login_data = r.json()
+                        self.test("Login response has 'require_2fa': true", login_data.get("require_2fa") == True)
+                        self.test("Login response has 'mfa_token'", "mfa_token" in login_data)
+                        
+                        if "mfa_token" in login_data:
+                            mfa_token = login_data["mfa_token"]
+                            
+                            # 5. Complete 2FA login with TOTP code
+                            code = totp.now()
+                            r = requests.post(
+                                f"{BASE_URL}/admin/login/2fa",
+                                json={"mfa_token": mfa_token, "code": code},
+                                timeout=10
+                            )
+                            self.test("POST /admin/login/2fa with valid code returns 200", r.status_code == 200, f"Got {r.status_code}")
+                            
+                            if r.status_code == 200:
+                                login2fa_data = r.json()
+                                self.test("2FA login response has 'token'", "token" in login2fa_data)
+                                if "token" in login2fa_data:
+                                    self.token = login2fa_data["token"]  # Update token
+                            
+                            # 6. Test recovery code usage
+                            if self.recovery_codes:
+                                self.log("Testing recovery code login...", "INFO")
+                                
+                                # Get new mfa_token
+                                r = requests.post(f"{BASE_URL}/admin/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}, timeout=10)
+                                if r.status_code == 200 and "mfa_token" in r.json():
+                                    mfa_token = r.json()["mfa_token"]
+                                    recovery_code = self.recovery_codes[0]
+                                    
+                                    r = requests.post(
+                                        f"{BASE_URL}/admin/login/2fa",
+                                        json={"mfa_token": mfa_token, "recovery_code": recovery_code},
+                                        timeout=10
+                                    )
+                                    self.test("Login with recovery code returns 200", r.status_code == 200, f"Got {r.status_code}")
+                                    
+                                    if r.status_code == 200:
+                                        recovery_data = r.json()
+                                        self.test("Recovery login has 'used_recovery_code': true", recovery_data.get("used_recovery_code") == True)
+                                        self.test("Recovery codes remaining is 9", recovery_data.get("recovery_codes_remaining") == 9)
+                                        
+                                        if "token" in recovery_data:
+                                            self.token = recovery_data["token"]
+                                        
+                                        # 7. Try to use same recovery code again (should fail)
+                                        r = requests.post(f"{BASE_URL}/admin/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}, timeout=10)
+                                        if r.status_code == 200 and "mfa_token" in r.json():
+                                            mfa_token = r.json()["mfa_token"]
+                                            r = requests.post(
+                                                f"{BASE_URL}/admin/login/2fa",
+                                                json={"mfa_token": mfa_token, "recovery_code": recovery_code},
+                                                timeout=10
+                                            )
+                                            self.test("Reusing recovery code returns 401", r.status_code == 401, f"Got {r.status_code}")
+                            
+                            # 8. Test regenerate recovery codes
+                            self.log("Testing recovery code regeneration...", "INFO")
+                            code = totp.now()
+                            r = requests.post(
+                                f"{BASE_URL}/admin/me/2fa/regenerate-recovery",
+                                headers=self.headers(),
+                                json={"current_password": ADMIN_PASSWORD, "code": code},
+                                timeout=10
+                            )
+                            self.test("POST /admin/me/2fa/regenerate-recovery returns 200", r.status_code == 200, f"Got {r.status_code}")
+                            
+                            if r.status_code == 200:
+                                regen_data = r.json()
+                                self.test("Regenerate response has 'recovery_codes'", "recovery_codes" in regen_data)
+                                if "recovery_codes" in regen_data:
+                                    new_codes = regen_data["recovery_codes"]
+                                    self.test("Got 10 new recovery codes", len(new_codes) == 10)
+                                    # Verify old code is different from new codes
+                                    if self.recovery_codes:
+                                        old_code = self.recovery_codes[1]  # Use second code (first was consumed)
+                                        self.test("Old recovery code not in new batch", old_code not in new_codes)
+                    
+                    # 9. CRITICAL: Disable 2FA to restore normal login
+                    self.log("CRITICAL: Disabling 2FA to restore normal login...", "WARN")
+                    code = totp.now()
+                    r = requests.post(
+                        f"{BASE_URL}/admin/me/2fa/disable",
+                        headers=self.headers(),
+                        json={"current_password": ADMIN_PASSWORD, "code": code},
+                        timeout=10
+                    )
+                    self.test("POST /admin/me/2fa/disable returns 200", r.status_code == 200, f"Got {r.status_code}")
+                    
+                    if r.status_code == 200:
+                        # Verify 2FA is disabled
+                        me = self.get_me()
+                        self.test("User totp_enabled is False after disable", me.get("totp_enabled") == False)
+                        
+                        # Verify normal login works
+                        r = requests.post(f"{BASE_URL}/admin/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}, timeout=10)
+                        self.test("Normal login works after disabling 2FA", r.status_code == 200 and "token" in r.json())
 
-    # ==================== SUMMARY ====================
-    def print_summary(self):
-        print("\n" + "="*60)
-        print("PHASE 6 BACKEND TEST SUMMARY")
-        print("="*60)
-        print(f"Total tests run: {self.tests_run}")
-        print(f"✅ Passed: {self.tests_passed}")
-        print(f"❌ Failed: {self.tests_failed}")
-        print(f"Success rate: {(self.tests_passed/self.tests_run*100):.1f}%")
+    # ==================== ERROR HANDLING TESTS ====================
+    def test_error_handling(self):
+        self.log("\n=== Testing Error Handling ===", "INFO")
         
-        if self.failed_tests:
-            print("\n" + "="*60)
-            print("FAILED TESTS:")
-            print("="*60)
-            for i, test in enumerate(self.failed_tests, 1):
-                print(f"{i}. {test['name']}")
-                print(f"   Error: {test['error']}")
+        # Wrong password
+        r = requests.post(f"{BASE_URL}/admin/login", json={"email": ADMIN_EMAIL, "password": "wrongpassword"}, timeout=10)
+        self.test("Wrong password returns 401", r.status_code == 401)
         
-        print("="*60)
+        # Wrong email
+        r = requests.post(f"{BASE_URL}/admin/login", json={"email": "nonexistent@example.com", "password": ADMIN_PASSWORD}, timeout=10)
+        self.test("Wrong email returns 401", r.status_code == 401)
+
+    # ==================== MAIN TEST RUNNER ====================
+    def run_all_tests(self):
+        self.log("=" * 60, "INFO")
+        self.log("WatchNexus Admin Security Features Test Suite", "INFO")
+        self.log("=" * 60, "INFO")
+        
+        # Initial login
+        self.log("\nLogging in as admin...", "INFO")
+        login_data = self.login()
+        if "token" not in login_data:
+            self.log(f"FATAL: Cannot login - {login_data}", "FAIL")
+            return 1
+        self.log(f"Logged in successfully, token: {self.token[:20]}...", "PASS")
+        
+        # Run test suites
+        try:
+            self.test_ip_allowlist()
+            self.test_audit_filtering()
+            self.test_2fa_lifecycle()
+            self.test_error_handling()
+        except Exception as e:
+            self.log(f"Test suite error: {e}", "FAIL")
+            import traceback
+            traceback.print_exc()
+        
+        # Summary
+        self.log("\n" + "=" * 60, "INFO")
+        self.log("TEST SUMMARY", "INFO")
+        self.log("=" * 60, "INFO")
+        self.log(f"Total tests: {self.tests_run}", "INFO")
+        self.log(f"Passed: {self.tests_passed}", "PASS")
+        self.log(f"Failed: {self.tests_failed}", "FAIL" if self.tests_failed > 0 else "INFO")
+        
+        if self.failures:
+            self.log("\nFailed tests:", "FAIL")
+            for f in self.failures:
+                self.log(f"  - {f}", "FAIL")
+        
+        success_rate = (self.tests_passed / self.tests_run * 100) if self.tests_run > 0 else 0
+        self.log(f"\nSuccess rate: {success_rate:.1f}%", "INFO")
+        
         return 0 if self.tests_failed == 0 else 1
 
-def main():
-    tester = Phase6Tester()
-    
-    # Core tests
-    tester.test("Health check", tester.test_health_check)
-    tester.test("Admin login", tester.test_admin_login)
-    
-    # Runtime settings
-    tester.test("Runtime settings GET (no secret leakage)", tester.test_runtime_settings_get)
-    tester.test("Runtime settings PUT (live update)", tester.test_runtime_settings_put_live_update)
-    
-    # API keys
-    tester.test("API keys list and bootstrap key exists", tester.test_api_keys_list_and_bootstrap)
-    tester.test("API keys create and revoke", tester.test_api_keys_create_revoke)
-    
-    # License lifecycle
-    tester.test("Full license lifecycle", tester.test_full_license_lifecycle)
-    
-    # Webhook signature verification
-    tester.test("Stripe webhook uses DB secret", tester.test_stripe_webhook_uses_db_secret)
-    tester.test("LemonSqueezy webhook uses DB secret", tester.test_lemonsqueezy_webhook_uses_db_secret)
-    
-    # Rate limiting
-    tester.test("Rate limit on admin login", tester.test_rate_limit_admin_login)
-    
-    # Audit log
-    tester.test("Audit log records mutations", tester.test_audit_log_records_mutations)
-    
-    return tester.print_summary()
 
 if __name__ == "__main__":
-    sys.exit(main())
+    tester = SecurityTester()
+    sys.exit(tester.run_all_tests())

@@ -231,6 +231,8 @@ async def on_startup():
     await db.activations.create_index([("license_id", 1), ("fingerprint", 1)])
     await db.api_keys.create_index("key", unique=True)
     await db.audit_log.create_index("ts")
+    await db.audit_log.create_index("actor_id")
+    await db.audit_log.create_index("actor_email")
     await db.webhook_events.create_index("received_at")
     await db.webhook_events.create_index([("provider", 1), ("provider_event_id", 1)])
     await db.customers.create_index("email", unique=True)

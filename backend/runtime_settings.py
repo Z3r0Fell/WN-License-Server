@@ -67,6 +67,10 @@ EDITABLE_KEYS: dict[str, dict] = {
     "EMAIL_FROM_BRAND":            {"category": "branding", "secret": False,
                                      "label": "Brand name (used in emails)",
                                      "help": "Defaults to EMAIL_FROM_NAME if blank."},
+    # ---- Security ----
+    "ADMIN_LOGIN_IP_ALLOWLIST":    {"category": "security", "secret": False,
+                                     "label": "Admin login IP allowlist",
+                                     "help": "Comma-separated IPs or CIDR ranges allowed to call /api/admin/login. Leave blank to allow all. IPv4 + IPv6 supported. Example: 203.0.113.5, 198.51.100.0/24"},
 }
 
 _cache: dict[str, str] = {}

@@ -31,3 +31,7 @@ python-dotenv==1.0.1
 # --- outbound integrations (lazy-imported in code; safe to install) ---
 sendgrid==6.11.0
 requests==2.32.3
+
+# --- 2FA ---
+pyotp==2.9.0
+qrcode[pil]==7.4.2

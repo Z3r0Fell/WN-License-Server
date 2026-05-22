@@ -35,8 +35,11 @@ function SeverityIcon({ severity }) {
 
 export default function AdminAudit() {
   const [items, setItems] = useState([]);
+  const [actors, setActors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actor, setActor] = useState('all');
+  const [actorEmail, setActorEmail] = useState('all');
+  const [severity, setSeverity] = useState('all');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
 
@@ -45,23 +48,34 @@ export default function AdminAudit() {
     return () => clearTimeout(id);
   }, [search]);
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await adminApi.get('/admin/audit/actors');
+        setActors(r.data || []);
+      } catch { /* non-blocking */ }
+    })();
+  }, []);
+
   const load = async () => {
     setLoading(true);
     try {
       const params = { limit: 300 };
       if (actor !== 'all') params.actor_type = actor;
       if (debouncedSearch) params.action = debouncedSearch;
+      if (actorEmail !== 'all') params.actor_email = actorEmail;
+      if (severity !== 'all') params.severity = severity;
       const r = await adminApi.get('/admin/audit', { params });
       setItems(r.data);
     } finally {
       setLoading(false);
     }
   };
-  useEffect(() => { load(); }, [actor, debouncedSearch]);
+  useEffect(() => { load(); }, [actor, actorEmail, severity, debouncedSearch]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const reset = () => { setActor('all'); setSearch(''); };
+  const reset = () => { setActor('all'); setActorEmail('all'); setSeverity('all'); setSearch(''); };
 
-  const hasFilter = actor !== 'all' || !!debouncedSearch;
+  const hasFilter = actor !== 'all' || actorEmail !== 'all' || severity !== 'all' || !!debouncedSearch;
 
   return (
     <div>
@@ -92,6 +106,36 @@ export default function AdminAudit() {
             {ACTOR_OPTIONS.map((o) => (
               <SelectItem key={o.value} value={o.value} data-testid={`audit-actor-option-${o.value}`}>{o.label}</SelectItem>
             ))}
+          </SelectContent>
+        </Select>
+        <Select value={actorEmail} onValueChange={setActorEmail}>
+          <SelectTrigger className="w-64" data-testid="audit-actor-email-select">
+            <SelectValue placeholder="Specific user" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Any user</SelectItem>
+            {actors
+              .filter((a) => a.actor_email)
+              .map((a) => (
+                <SelectItem
+                  key={`${a.actor_type}:${a.actor_email}`}
+                  value={a.actor_email}
+                  data-testid={`audit-actor-email-${a.actor_email}`}
+                >
+                  {a.actor_email} <span className="text-muted-foreground ml-1">({a.actor_type} · {a.events})</span>
+                </SelectItem>
+              ))}
+          </SelectContent>
+        </Select>
+        <Select value={severity} onValueChange={setSeverity}>
+          <SelectTrigger className="w-40" data-testid="audit-severity-select">
+            <SelectValue placeholder="Severity" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All severities</SelectItem>
+            <SelectItem value="info">Info</SelectItem>
+            <SelectItem value="warning">Warning</SelectItem>
+            <SelectItem value="error">Error</SelectItem>
           </SelectContent>
         </Select>
         {hasFilter && (

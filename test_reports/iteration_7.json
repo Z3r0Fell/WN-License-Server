@@ -1,0 +1,57 @@
+{
+  "summary": "Completed comprehensive testing of three new admin security features: IP allowlist for admin login, audit log filtering by user and severity, and TOTP-based 2FA with full lifecycle (enroll, login, recovery codes, regeneration, disable). All backend APIs and frontend UI components verified and working correctly.",
+  "backend_issues": {
+    "critical_bugs": [],
+    "flaky_endpoints": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "passed_tests": [
+    "Backend: IP allowlist GET/PUT /api/admin/settings exposes ADMIN_LOGIN_IP_ALLOWLIST in security category",
+    "Backend: Setting IP allowlist to exclude client IP causes /api/admin/login to return 403",
+    "Backend: Clearing IP allowlist restores normal 200 login",
+    "Backend: GET /api/admin/audit accepts actor_email query param and filters correctly",
+    "Backend: GET /api/admin/audit accepts severity query param and filters correctly",
+    "Backend: GET /api/admin/audit/actors returns deduped actor directory",
+    "Backend: POST /api/admin/me/2fa/enroll returns secret, otpauth_uri, and qr_png_data_uri",
+    "Backend: POST /api/admin/me/2fa/verify with valid TOTP code enables 2FA and returns 10 recovery codes",
+    "Backend: POST /api/admin/login with 2FA enabled returns {require_2fa:true, mfa_token}",
+    "Backend: POST /api/admin/login/2fa with mfa_token+code returns session token",
+    "Backend: Recovery code login works and consumes the code (remaining count decreases)",
+    "Backend: Reusing consumed recovery code returns 401",
+    "Backend: POST /api/admin/me/2fa/regenerate-recovery returns fresh batch of 10 codes",
+    "Backend: Old recovery codes are invalidated after regeneration",
+    "Backend: POST /api/admin/me/2fa/disable removes 2FA successfully",
+    "Backend: Normal login works after disabling 2FA",
+    "Backend: Wrong password returns 401",
+    "Backend: Wrong email returns 401",
+    "Frontend: AdminSettings Security tab (data-testid='settings-tab-security') is present",
+    "Frontend: ADMIN_LOGIN_IP_ALLOWLIST field is visible and editable in Security tab",
+    "Frontend: AdminAudit actor_email select dropdown (data-testid='audit-actor-email-select') is present",
+    "Frontend: AdminAudit severity select dropdown (data-testid='audit-severity-select') is present",
+    "Frontend: Severity filter works correctly (applied Warning filter successfully)",
+    "Frontend: AdminProfile 2FA badge (data-testid='profile-2fa-badge') shows correct status",
+    "Frontend: Enable 2FA button (data-testid='profile-2fa-enroll') opens enrollment dialog",
+    "Frontend: QR code (data-testid='enroll-qr') is displayed in enrollment dialog",
+    "Frontend: Enrollment dialog has code input (data-testid='enroll-code') and password confirm (data-testid='enroll-password')",
+    "Frontend: AdminLogin 2FA form (data-testid='admin-login-2fa-form') appears after password login when 2FA is enabled",
+    "Frontend: TOTP input (data-testid='admin-login-totp-input') is present in 2FA form",
+    "Frontend: Recovery code toggle (data-testid='admin-login-toggle-recovery') is present"
+  ],
+  "test_report_links": [
+    "/app/backend_test.py"
+  ],
+  "success_percentage": {
+    "backend": "100% (46/46 tests passed)",
+    "frontend": "100% (all UI elements present and functional)"
+  },
+  "updated_files": [
+    "/app/backend_test.py"
+  ],
+  "action_item_for_main_agent": "",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_test_itself": false
+}

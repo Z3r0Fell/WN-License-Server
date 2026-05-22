@@ -9,7 +9,7 @@ import {
 } from '../components/ui/tabs';
 import { toast } from 'sonner';
 import {
-  Save, Mail, Webhook, Globe2, Eye, EyeOff, AlertTriangle, MailCheck, Database, Cog,
+  Save, Mail, Webhook, Globe2, Eye, EyeOff, AlertTriangle, MailCheck, Database, Cog, ShieldCheck,
 } from 'lucide-react';
 
 const CATEGORY_META = {
@@ -19,6 +19,8 @@ const CATEGORY_META = {
               description: 'Set SendGrid (HTTP API) OR an SMTP block. SendGrid takes priority when both are filled.' },
   branding: { icon: Globe2,  label: 'Branding & URLs',
               description: 'Public URLs and brand name used in customer-facing emails and links.' },
+  security: { icon: ShieldCheck, label: 'Security',
+              description: 'Restrict admin login by IP address. Leave the allowlist blank during initial setup.' },
 };
 
 function SourceTag({ source }) {

@@ -1,46 +1,38 @@
 [
   {
-    "content": "Backend: add role/is_active/last_login_at to admin_users + role-aware auth helpers",
+    "content": "Add IP allowlist for /admin/login (settings + route check + Settings UI)",
     "status": "completed"
   },
   {
-    "content": "Backend: add /admin/me/change-password endpoint",
+    "content": "Add audit log filtering by admin user (backend filters + UI dropdown)",
     "status": "completed"
   },
   {
-    "content": "Backend: add /admin/users CRUD (list/create/update/delete) with guards",
+    "content": "Backend: 2FA enrollment + login flow + disable + regenerate codes",
     "status": "completed"
   },
   {
-    "content": "Backend: add /admin/users/{id}/reset-password endpoint",
+    "content": "Add pyotp/qrcode to requirements.txt",
     "status": "completed"
   },
   {
-    "content": "Backend: add invite flow — create invite, accept invite (public), email via SendGrid",
+    "content": "Frontend: AdminLogin two-step (challenge + 2FA code/recovery)",
     "status": "completed"
   },
   {
-    "content": "Backend: enforce role gating on destructive endpoints (Settings PUT, products/licenses CRUD, api-keys, etc.)",
+    "content": "Frontend: AdminProfile 2FA enroll/disable/regenerate UI",
     "status": "completed"
   },
   {
-    "content": "Frontend: AdminUsers page (list/create/edit/delete/reset/invite)",
+    "content": "Frontend: AdminAudit filters (actor user, severity)",
     "status": "completed"
   },
   {
-    "content": "Frontend: Change-my-password page/modal + role surfaced in topbar",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: AcceptInvite public route",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: hide admin-only actions when role===support",
+    "content": "Frontend: Settings UI shows new 'security' category",
     "status": "completed"
   },
   {
     "content": "Test with testing_agent_v3",
-    "status": "completed"
+    "status": "in_progress"
   }
 ]

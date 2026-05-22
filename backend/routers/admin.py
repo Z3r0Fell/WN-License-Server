@@ -3,6 +3,7 @@ import csv
 import io
 import os
 import secrets
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -16,6 +17,8 @@ from audit import log as audit_log
 from crypto_core import (generate_hmac_license, generate_rsa_license,
                          get_rsa_public_pem)
 from db import db, now_iso, serialize_doc
+import jwt as _jwt
+import mfa
 import runtime_settings
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -27,19 +30,80 @@ class AdminLoginIn(BaseModel):
     password: str
 
 
+# Short-lived MFA challenge token. Issued by /login when 2FA is required,
+# consumed by /login/2fa to mint the real session JWT.
+MFA_CHALLENGE_TTL_SECONDS = 5 * 60
+
+
+def _client_ip(request: Request) -> Optional[str]:
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    real = request.headers.get("x-real-ip")
+    if real:
+        return real.strip()
+    return request.client.host if request.client else None
+
+
+def _issue_mfa_challenge(user_id: str) -> str:
+    now = int(time.time())
+    secret = os.environ.get("JWT_SECRET", "dev-secret")
+    return _jwt.encode(
+        {
+            "sub": user_id,
+            "purpose": "mfa-challenge",
+            "iat": now,
+            "exp": now + MFA_CHALLENGE_TTL_SECONDS,
+            "iss": "watchnexus-mfa",
+        },
+        secret,
+        algorithm="HS256",
+    )
+
+
+def _decode_mfa_challenge(token: str) -> Optional[str]:
+    secret = os.environ.get("JWT_SECRET", "dev-secret")
+    try:
+        claims = _jwt.decode(token, secret, algorithms=["HS256"],
+                             issuer="watchnexus-mfa")
+        if claims.get("purpose") != "mfa-challenge":
+            return None
+        return claims.get("sub")
+    except _jwt.InvalidTokenError:
+        return None
+
+
 @router.post("/login")
 async def admin_login(body: AdminLoginIn, request: Request):
+    ip = _client_ip(request)
+    # IP allowlist (admin-only restriction; webhook/customer routes unaffected).
+    if not mfa.admin_login_ip_allowed(ip):
+        await audit_log("admin", None, body.email.lower(), "admin.login_ip_blocked",
+                        severity="warning", ip=ip,
+                        meta={"reason": "ip_not_in_allowlist"})
+        raise HTTPException(403, "This IP address is not allowed to sign in. "
+                                  "Contact your administrator.")
     user = await db.admin_users.find_one({"email": body.email.lower()}, {"_id": 0})
     if not user or not verify_password(body.password, user["password_hash"]):
         raise HTTPException(401, "Invalid credentials")
     if user.get("is_active") is False:
         raise HTTPException(403, "Account disabled")
+    # If the user has 2FA enabled, do not issue a full session yet.
+    if user.get("totp_enabled"):
+        challenge = _issue_mfa_challenge(user["id"])
+        await audit_log("admin", user["id"], user["email"], "admin.login_mfa_required",
+                        severity="info", ip=ip)
+        return {
+            "require_2fa": True,
+            "mfa_token": challenge,
+            "expires_in": MFA_CHALLENGE_TTL_SECONDS,
+        }
     token = issue_session_token(user["id"], "admin", user["email"])
     await db.admin_users.update_one(
         {"id": user["id"]}, {"$set": {"last_login_at": now_iso()}}
     )
     await audit_log("admin", user["id"], user["email"], "admin.login",
-                    severity="info", ip=request.client.host if request.client else None)
+                    severity="info", ip=ip)
     return {
         "token": token,
         "user": {
@@ -51,6 +115,69 @@ async def admin_login(body: AdminLoginIn, request: Request):
     }
 
 
+class AdminLogin2FAIn(BaseModel):
+    mfa_token: str
+    code: Optional[str] = None            # TOTP 6-digit
+    recovery_code: Optional[str] = None   # one-time recovery code
+
+
+@router.post("/login/2fa")
+async def admin_login_2fa(body: AdminLogin2FAIn, request: Request):
+    ip = _client_ip(request)
+    if not mfa.admin_login_ip_allowed(ip):
+        raise HTTPException(403, "This IP address is not allowed to sign in.")
+    if not body.code and not body.recovery_code:
+        raise HTTPException(400, "Provide either code or recovery_code")
+    user_id = _decode_mfa_challenge(body.mfa_token)
+    if not user_id:
+        raise HTTPException(401, "MFA session expired - please log in again")
+    user = await db.admin_users.find_one({"id": user_id}, {"_id": 0})
+    if not user or not user.get("totp_enabled"):
+        raise HTTPException(401, "MFA not enabled for this account")
+    if user.get("is_active") is False:
+        raise HTTPException(403, "Account disabled")
+
+    ok = False
+    consumed_recovery = False
+    if body.code:
+        ok = mfa.verify_totp(user.get("totp_secret") or "", body.code)
+    if not ok and body.recovery_code:
+        new_codes = mfa.consume_recovery_code(
+            user.get("totp_recovery_hashes") or [], body.recovery_code
+        )
+        if new_codes is not None:
+            ok = True
+            consumed_recovery = True
+            await db.admin_users.update_one(
+                {"id": user["id"]},
+                {"$set": {"totp_recovery_hashes": new_codes}},
+            )
+    if not ok:
+        await audit_log("admin", user["id"], user["email"], "admin.login_2fa_failed",
+                        severity="warning", ip=ip)
+        raise HTTPException(401, "Invalid code")
+
+    token = issue_session_token(user["id"], "admin", user["email"])
+    await db.admin_users.update_one(
+        {"id": user["id"]}, {"$set": {"last_login_at": now_iso()}}
+    )
+    await audit_log("admin", user["id"], user["email"],
+                    "admin.login_2fa" + ("_recovery" if consumed_recovery else ""),
+                    severity="info", ip=ip)
+    return {
+        "token": token,
+        "user": {
+            "id": user["id"],
+            "email": user["email"],
+            "name": user.get("name"),
+            "admin_role": user.get("admin_role") or "admin",
+        },
+        "used_recovery_code": consumed_recovery,
+        "recovery_codes_remaining": len(user.get("totp_recovery_hashes") or [])
+                                    - (1 if consumed_recovery else 0),
+    }
+
+
 @router.get("/me")
 async def admin_me(admin=Depends(get_current_admin)):
     return {
@@ -59,7 +186,112 @@ async def admin_me(admin=Depends(get_current_admin)):
         "name": admin.get("name"),
         "admin_role": admin.get("admin_role") or "admin",
         "is_active": admin.get("is_active", True),
+        "totp_enabled": bool(admin.get("totp_enabled")),
+        "recovery_codes_remaining": len(admin.get("totp_recovery_hashes") or []),
     }
+
+
+# -------------------- 2FA enrollment --------------------
+class Verify2FAIn(BaseModel):
+    secret: str        # base32 secret returned by /enroll
+    code: str          # 6-digit TOTP entered by user
+    current_password: str  # extra confirmation before enabling
+
+
+class Disable2FAIn(BaseModel):
+    current_password: str
+    code: Optional[str] = None            # accept TOTP or recovery code
+    recovery_code: Optional[str] = None
+
+
+@router.post("/me/2fa/enroll")
+async def me_2fa_enroll(admin=Depends(get_current_admin)):
+    """Generate a fresh secret + QR code. Caller must POST to /verify to enable."""
+    secret = mfa.new_secret()
+    uri = mfa.provisioning_uri(secret, admin["email"])
+    return {
+        "secret": secret,
+        "otpauth_uri": uri,
+        "qr_png_data_uri": mfa.qr_png_data_uri(uri),
+    }
+
+
+@router.post("/me/2fa/verify")
+async def me_2fa_verify(body: Verify2FAIn, request: Request,
+                         admin=Depends(get_current_admin)):
+    """Confirm a TOTP code against the secret. On success, enable 2FA and
+    return one-time recovery codes (shown ONCE)."""
+    fresh = await db.admin_users.find_one({"id": admin["id"]}, {"_id": 0})
+    if not verify_password(body.current_password, fresh["password_hash"]):
+        raise HTTPException(400, "Current password is incorrect")
+    if not mfa.verify_totp(body.secret, body.code):
+        raise HTTPException(400, "Invalid code. Make sure your device clock is in sync.")
+    recovery = mfa.new_recovery_codes()
+    await db.admin_users.update_one(
+        {"id": admin["id"]},
+        {"$set": {
+            "totp_secret": body.secret,
+            "totp_enabled": True,
+            "totp_enabled_at": now_iso(),
+            "totp_recovery_hashes": mfa.hash_recovery_codes(recovery),
+        }},
+    )
+    await audit_log("admin", admin["id"], admin["email"], "admin_user.2fa_enabled",
+                    "admin_user", admin["id"], severity="warning",
+                    ip=request.client.host if request.client else None)
+    return {"ok": True, "recovery_codes": recovery}
+
+
+@router.post("/me/2fa/disable")
+async def me_2fa_disable(body: Disable2FAIn, request: Request,
+                          admin=Depends(get_current_admin)):
+    fresh = await db.admin_users.find_one({"id": admin["id"]}, {"_id": 0})
+    if not verify_password(body.current_password, fresh["password_hash"]):
+        raise HTTPException(400, "Current password is incorrect")
+    if not fresh.get("totp_enabled"):
+        return {"ok": True, "already_disabled": True}
+    ok = False
+    if body.code:
+        ok = mfa.verify_totp(fresh.get("totp_secret") or "", body.code)
+    if not ok and body.recovery_code:
+        ok = mfa.consume_recovery_code(
+            fresh.get("totp_recovery_hashes") or [], body.recovery_code
+        ) is not None
+    if not ok:
+        raise HTTPException(400, "Invalid 2FA code")
+    await db.admin_users.update_one(
+        {"id": admin["id"]},
+        {"$set": {"totp_enabled": False},
+         "$unset": {"totp_secret": "", "totp_recovery_hashes": "",
+                    "totp_enabled_at": ""}},
+    )
+    await audit_log("admin", admin["id"], admin["email"], "admin_user.2fa_disabled",
+                    "admin_user", admin["id"], severity="warning",
+                    ip=request.client.host if request.client else None)
+    return {"ok": True}
+
+
+@router.post("/me/2fa/regenerate-recovery")
+async def me_2fa_regenerate(body: Disable2FAIn, request: Request,
+                             admin=Depends(get_current_admin)):
+    """Replace recovery codes (requires current password + a current TOTP code)."""
+    fresh = await db.admin_users.find_one({"id": admin["id"]}, {"_id": 0})
+    if not verify_password(body.current_password, fresh["password_hash"]):
+        raise HTTPException(400, "Current password is incorrect")
+    if not fresh.get("totp_enabled"):
+        raise HTTPException(400, "2FA is not enabled")
+    if not body.code or not mfa.verify_totp(fresh.get("totp_secret") or "", body.code):
+        raise HTTPException(400, "Invalid TOTP code")
+    recovery = mfa.new_recovery_codes()
+    await db.admin_users.update_one(
+        {"id": admin["id"]},
+        {"$set": {"totp_recovery_hashes": mfa.hash_recovery_codes(recovery)}},
+    )
+    await audit_log("admin", admin["id"], admin["email"],
+                    "admin_user.2fa_recovery_regenerated", "admin_user", admin["id"],
+                    severity="warning",
+                    ip=request.client.host if request.client else None)
+    return {"ok": True, "recovery_codes": recovery}
 
 
 # -------------------- Dashboard --------------------
@@ -493,14 +725,60 @@ async def webhook_event_detail(eid: str, admin=Depends(get_current_admin)):
 # -------------------- Audit --------------------
 @router.get("/audit")
 async def audit_list(admin=Depends(get_current_admin), limit: int = 300,
-                    actor_type: Optional[str] = None, action: Optional[str] = None):
-    q = {}
+                    actor_type: Optional[str] = None, action: Optional[str] = None,
+                    actor_id: Optional[str] = None, actor_email: Optional[str] = None,
+                    severity: Optional[str] = None,
+                    since: Optional[str] = None, until: Optional[str] = None):
+    q: dict = {}
     if actor_type:
         q["actor_type"] = actor_type
     if action:
         q["action"] = {"$regex": action, "$options": "i"}
+    if actor_id:
+        q["actor_id"] = actor_id
+    if actor_email:
+        q["actor_email"] = {"$regex": actor_email, "$options": "i"}
+    if severity:
+        q["severity"] = severity
+    if since or until:
+        ts_q: dict = {}
+        if since:
+            ts_q["$gte"] = since
+        if until:
+            ts_q["$lte"] = until
+        q["ts"] = ts_q
+    limit = max(1, min(int(limit or 300), 1000))
     docs = await db.audit_log.find(q, {"_id": 0}).sort("ts", -1).limit(limit).to_list(limit)
     return serialize_doc(docs)
+
+
+@router.get("/audit/actors")
+async def audit_actors(admin=Depends(get_current_admin)):
+    """Return a small directory of distinct actors that appear in the audit log
+    (used to populate the filter dropdown in the UI)."""
+    pipeline = [
+        {"$match": {"actor_type": {"$in": ["admin", "customer", "integrator", "webhook"]}}},
+        {"$group": {"_id": {"id": "$actor_id", "email": "$actor_email",
+                            "type": "$actor_type"},
+                    "events": {"$sum": 1},
+                    "last_seen": {"$max": "$ts"}}},
+        {"$sort": {"last_seen": -1}},
+        {"$limit": 200},
+    ]
+    rows = await db.audit_log.aggregate(pipeline).to_list(200)
+    out = []
+    for r in rows:
+        k = r["_id"]
+        if not k.get("id") and not k.get("email"):
+            continue
+        out.append({
+            "actor_id": k.get("id"),
+            "actor_email": k.get("email"),
+            "actor_type": k.get("type"),
+            "events": r.get("events", 0),
+            "last_seen": r.get("last_seen"),
+        })
+    return out
 
 
 # -------------------- RSA pubkey --------------------
