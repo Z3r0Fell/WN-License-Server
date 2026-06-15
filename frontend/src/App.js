@@ -10,6 +10,8 @@ import AdminDashboard from './pages/AdminDashboard';
 import AdminQuickstart from './pages/AdminQuickstart';
 import AdminProducts from './pages/AdminProducts';
 import AdminLicenses from './pages/AdminLicenses';
+import AdminSubscriptions from './pages/AdminSubscriptions';
+import AdminSubscriptionPlans from './pages/AdminSubscriptionPlans';
 import AdminCustomers from './pages/AdminCustomers';
 import AdminApiKeys from './pages/AdminApiKeys';
 import AdminBuilds from './pages/AdminBuilds';
@@ -64,6 +66,8 @@ function App() {
             <Route path="quickstart" element={<AdminQuickstart />} />
             <Route path="products" element={<AdminProducts />} />
             <Route path="licenses" element={<AdminLicenses />} />
+            <Route path="subscriptions" element={<AdminSubscriptions />} />
+            <Route path="subscription-plans" element={<AdminSubscriptionPlans />} />
             <Route path="customers" element={<AdminCustomers />} />
             <Route path="api-keys" element={<AdminApiKeys />} />
             <Route path="builds" element={<AdminBuilds />} />

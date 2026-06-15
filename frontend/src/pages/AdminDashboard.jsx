@@ -4,7 +4,7 @@ import { adminApi } from '../lib/api';
 import { Skeleton } from '../components/ui/skeleton';
 import { StatusPill } from '../components/StatusPill';
 import { CopyChip } from '../components/CopyChip';
-import { KeyRound, Activity, Users, Package, Webhook, FileBarChart2, Zap, ArrowRight } from 'lucide-react';
+import { KeyRound, Activity, Users, Package, Webhook, FileBarChart2, Zap, ArrowRight, CreditCard } from 'lucide-react';
 
 function StatCard({ icon: Icon, label, value, hint, testid }) {
   return (
@@ -59,11 +59,28 @@ export default function AdminDashboard() {
           {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)}
         </div>
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
-          <StatCard icon={KeyRound} label="Total licenses" value={data?.licenses_total ?? 0} testid="admin-stats-total-licenses" />
-          <StatCard icon={Activity} label="Active installs" value={data?.active_installs ?? 0} testid="admin-stats-active-installs" />
-          <StatCard icon={Users} label="Customers" value={data?.customers_total ?? 0} testid="admin-stats-customers" />
-          <StatCard icon={Package} label="Products" value={data?.products_total ?? 0} testid="admin-stats-products" />
+        <div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
+            <StatCard icon={KeyRound} label="Total licenses" value={data?.licenses_total ?? 0} testid="admin-stats-total-licenses" />
+            <StatCard icon={Activity} label="Active installs" value={data?.active_installs ?? 0} testid="admin-stats-active-installs" />
+            <StatCard icon={Users} label="Customers" value={data?.customers_total ?? 0} testid="admin-stats-customers" />
+            <StatCard icon={Package} label="Products" value={data?.products_total ?? 0} testid="admin-stats-products" />
+          </div>
+          <div className="mt-4">
+            <h3 className="text-sm font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
+              <CreditCard className="h-3.5 w-3.5" /> Subscriptions
+            </h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <StatCard icon={CreditCard} label="Active subscriptions" value={data?.subscriptions_active ?? 0}
+                hint={`${data?.subscriptions_total ?? 0} total`} testid="admin-stats-subs-active" />
+              <StatCard icon={CreditCard} label="Past due" value={data?.subscriptions_past_due ?? 0}
+                hint="Requires attention" testid="admin-stats-subs-past-due" />
+              <StatCard icon={CreditCard} label="Canceled" value={data?.subscriptions_canceled ?? 0}
+                testid="admin-stats-subs-canceled" />
+              <StatCard icon={Package} label="Subscription plans" value={data?.subscription_plans_total ?? 0}
+                hint="Active plans" testid="admin-stats-sub-plans" />
+            </div>
+          </div>
         </div>
       )}
 

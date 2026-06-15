@@ -28,6 +28,7 @@ from routers import customer as customer_router
 from routers import integrate as integrate_router
 from routers import public as public_router
 from routers import quickstart as quickstart_router
+from routers import subscriptions as subscriptions_router
 from routers import webhooks_router
 import runtime_settings
 
@@ -107,6 +108,7 @@ api.include_router(admin_users_router.public_router)
 api.include_router(quickstart_router.router)
 api.include_router(customer_router.router)
 api.include_router(integrate_router.router)
+api.include_router(subscriptions_router.router)
 api.include_router(webhooks_router.router)
 app.include_router(api)
 

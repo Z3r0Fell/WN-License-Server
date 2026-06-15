@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
 import {
   Home, Package, KeyRound, Users, FileBarChart2, Webhook,
-  Download, ShieldCheck, LogOut, ListChecks, Zap, Cog, UserCog, UserCircle2,
+  Download, ShieldCheck, LogOut, ListChecks, Zap, Cog, UserCog, UserCircle2, CreditCard,
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -11,17 +11,19 @@ import { cn } from '../lib/utils';
 
 // requires_admin: if true, hidden when the current user has role 'support'.
 const NAV = [
-  { to: '/admin',           icon: Home,         label: 'Dashboard',  testid: 'nav-admin-dashboard',  requires_admin: false },
-  { to: '/admin/quickstart',icon: Zap,          label: 'Quickstart', testid: 'nav-admin-quickstart', requires_admin: false },
-  { to: '/admin/licenses',  icon: KeyRound,     label: 'Licenses',   testid: 'nav-admin-licenses',   requires_admin: false },
-  { to: '/admin/products',  icon: Package,      label: 'Products',   testid: 'nav-admin-products',   requires_admin: false },
-  { to: '/admin/customers', icon: Users,        label: 'Customers',  testid: 'nav-admin-customers',  requires_admin: false },
-  { to: '/admin/api-keys',  icon: ShieldCheck,  label: 'API Keys',   testid: 'nav-admin-api-keys',   requires_admin: true  },
-  { to: '/admin/builds',    icon: Download,     label: 'Builds',     testid: 'nav-admin-builds',     requires_admin: false },
-  { to: '/admin/webhooks',  icon: Webhook,      label: 'Webhooks',   testid: 'nav-admin-webhooks',   requires_admin: false },
-  { to: '/admin/audit',     icon: FileBarChart2,label: 'Audit',      testid: 'nav-admin-audit',      requires_admin: false },
-  { to: '/admin/users',     icon: UserCog,      label: 'Admin Users',testid: 'nav-admin-users',      requires_admin: false },
-  { to: '/admin/settings',  icon: Cog,          label: 'Settings',   testid: 'nav-admin-settings',   requires_admin: true  },
+  { to: '/admin',           icon: Home,         label: 'Dashboard',    testid: 'nav-admin-dashboard',    requires_admin: false },
+  { to: '/admin/quickstart',icon: Zap,          label: 'Quickstart',   testid: 'nav-admin-quickstart',   requires_admin: false },
+  { to: '/admin/licenses',  icon: KeyRound,     label: 'Licenses',     testid: 'nav-admin-licenses',     requires_admin: false },
+  { to: '/admin/subscriptions', icon: CreditCard, label: 'Subscriptions', testid: 'nav-admin-subscriptions', requires_admin: false },
+  { to: '/admin/subscription-plans',icon: Package, label: 'Sub Plans', testid: 'nav-admin-sub-plans',   requires_admin: true  },
+  { to: '/admin/products',  icon: Package,      label: 'Products',     testid: 'nav-admin-products',     requires_admin: false },
+  { to: '/admin/customers', icon: Users,        label: 'Customers',    testid: 'nav-admin-customers',    requires_admin: false },
+  { to: '/admin/api-keys',  icon: ShieldCheck,  label: 'API Keys',     testid: 'nav-admin-api-keys',     requires_admin: true  },
+  { to: '/admin/builds',    icon: Download,     label: 'Builds',       testid: 'nav-admin-builds',       requires_admin: false },
+  { to: '/admin/webhooks',  icon: Webhook,      label: 'Webhooks',     testid: 'nav-admin-webhooks',     requires_admin: false },
+  { to: '/admin/audit',     icon: FileBarChart2,label: 'Audit',        testid: 'nav-admin-audit',        requires_admin: false },
+  { to: '/admin/users',     icon: UserCog,      label: 'Admin Users',  testid: 'nav-admin-users',        requires_admin: false },
+  { to: '/admin/settings',  icon: Cog,          label: 'Settings',     testid: 'nav-admin-settings',     requires_admin: true  },
 ];
 
 export default function AdminLayout() {

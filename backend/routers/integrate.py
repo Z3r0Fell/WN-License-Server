@@ -15,6 +15,8 @@ from db import db, now_iso, serialize_doc
 
 import os
 
+from routers.subscriptions import resolve_subscription_status
+
 router = APIRouter(prefix="/integrate", tags=["integrate"])
 
 
@@ -61,6 +63,21 @@ async def activate(body: ActivateIn, request: Request, api_key=Depends(get_api_k
         raise HTTPException(400, "Invalid license key")
     if lic["status"] != "active":
         raise HTTPException(403, f"License is {lic['status']}")
+
+    # Subscription check
+    if lic.get("subscription_id"):
+        sub = await db.subscriptions.find_one({"id": lic["subscription_id"]}, {"_id": 0})
+        if sub:
+            sub = await resolve_subscription_status(sub)
+            if sub["status"] != "active":
+                raise HTTPException(403, f"Subscription is {sub['status']}")
+            # Sync license expiry with subscription period
+            if sub.get("current_period_end") and sub["current_period_end"] != lic.get("expires_at"):
+                await db.licenses.update_one(
+                    {"id": lic["id"]},
+                    {"$set": {"expires_at": sub["current_period_end"]}})
+                lic["expires_at"] = sub["current_period_end"]
+
     if lic.get("expires_at"):
         # if expires_at < now then expire it
         from datetime import datetime, timezone
@@ -143,6 +160,15 @@ async def validate(body: ValidateIn, request: Request, api_key=Depends(get_api_k
         return {"valid": False, "mode": "license_not_found"}
     if lic["status"] != "active":
         return {"valid": False, "mode": f"license_{lic['status']}"}
+
+    # Subscription check
+    if lic.get("subscription_id"):
+        sub = await db.subscriptions.find_one({"id": lic["subscription_id"]}, {"_id": 0})
+        if sub:
+            sub = await resolve_subscription_status(sub)
+            if sub["status"] != "active":
+                return {"valid": False, "mode": f"subscription_{sub['status']}"}
+
     activation = await db.activations.find_one({"id": claims.get("aid")}, {"_id": 0})
     if not activation or activation["status"] != "active":
         return {"valid": False, "mode": "activation_revoked"}

@@ -304,6 +304,12 @@ async def dashboard(admin=Depends(get_current_admin)):
     activations = await db.activations.count_documents({"status": "active"})
     customers = await db.customers.count_documents({})
     products = await db.products.count_documents({})
+    # Subscription stats
+    subs_active = await db.subscriptions.count_documents({"status": "active"})
+    subs_past_due = await db.subscriptions.count_documents({"status": "past_due"})
+    subs_canceled = await db.subscriptions.count_documents({"status": "canceled"})
+    subs_total = await db.subscriptions.count_documents({})
+    plans_total = await db.subscription_plans.count_documents({"status": "active"})
     recent_acts = await db.activations.find({}, {"_id": 0}).sort("created_at", -1).limit(8).to_list(8)
     recent_audit = await db.audit_log.find({}, {"_id": 0}).sort("ts", -1).limit(8).to_list(8)
     recent_webhooks = await db.webhook_events.find({}, {"_id": 0}).sort("received_at", -1).limit(8).to_list(8)
@@ -315,6 +321,11 @@ async def dashboard(admin=Depends(get_current_admin)):
         "active_installs": activations,
         "customers_total": customers,
         "products_total": products,
+        "subscriptions_active": subs_active,
+        "subscriptions_past_due": subs_past_due,
+        "subscriptions_canceled": subs_canceled,
+        "subscriptions_total": subs_total,
+        "subscription_plans_total": plans_total,
         "recent_activations": serialize_doc(recent_acts),
         "recent_audit": serialize_doc(recent_audit),
         "recent_webhooks": serialize_doc(recent_webhooks),
