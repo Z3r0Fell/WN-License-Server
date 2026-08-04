@@ -157,22 +157,19 @@ Then later, once `dig` shows the VPS IP for both names, drop the flag and re-run
 1. Visit **`https://licenses.watchnexus.ca/admin/login`**.
 2. Sign in with the email + password printed by the installer.
 3. Open **Settings** (admin sidebar) and paste in your live secrets — these are stored in MongoDB and override any `.env` values **without** a backend restart:
-   - Stripe webhook secret
-   - Lemon Squeezy / Paddle / Gumroad webhook secrets (if used)
+   - Stripe webhook secret (optional — only if you use Stripe to auto-issue licenses)
    - SendGrid API key (or SMTP host/port/user/pass)
    - Default "from" email + brand name
 4. Open **Quickstart** → copy the **bootstrap API key**, then:
    - Create your first **Product** (HMAC or RSA signing, fingerprint mode).
    - Issue a **License** to yourself for end-to-end testing.
 5. Visit **`https://techhub.watchnexus.ca/portal/login`** as the customer to confirm the portal works.
-6. Wire your payment provider webhooks to the admin domain:
+6. Wire your website to issue licenses after checkout:
 
-   | Provider       | URL                                                           | Settings field                  |
-   |----------------|---------------------------------------------------------------|---------------------------------|
-   | Stripe         | `https://licenses.watchnexus.ca/api/webhooks/stripe`          | `stripe_webhook_secret`         |
-   | Lemon Squeezy  | `https://licenses.watchnexus.ca/api/webhooks/lemonsqueezy`    | `lemonsqueezy_webhook_secret`   |
-   | Paddle         | `https://licenses.watchnexus.ca/api/webhooks/paddle`          | `paddle_webhook_secret`         |
-   | Gumroad        | `https://licenses.watchnexus.ca/api/webhooks/gumroad`         | `gumroad_webhook_secret`        |
+   | Integration                              | How it works                                                                 |
+   |------------------------------------------|------------------------------------------------------------------------------|
+   | Stripe webhook (optional)                | `https://licenses.watchnexus.ca/api/webhooks/stripe` → settings field `stripe_webhook_secret` |
+   | Website backend → `POST /api/integrate/mint` | Website handles checkout, then calls this endpoint (API key header) to mint a serial and email it to the buyer. |
 
 ---
 

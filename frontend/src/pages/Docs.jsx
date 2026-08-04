@@ -64,6 +64,25 @@ const CURL_DEACT = `curl -X POST "$WATCHNEXUS_URL/api/integrate/deactivate" \\
   -H "Content-Type: application/json" \\
   -d '{"activation_token":"eyJhbGciOi..."}'`;
 
+const CURL_MINT = `curl -X POST "$WATCHNEXUS_URL/api/integrate/mint" \\
+  -H "X-API-Key: $WATCHNEXUS_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"customer_email":"buyer@example.com","product_slug":"watchnexus-pro","plan":"standard","seats":1}'`;
+
+const MINT_RES = `200 OK
+{
+  "id":            "f7d5...-...",
+  "key":           "WNX-...",
+  "product_id":    "...",
+  "product_slug":  "watchnexus-pro",
+  "plan":          "standard",
+  "seats":         1,
+  "expires_at":    null,
+  "status":        "active",
+  "source":        "website"
+}
+// The serial is also emailed to customer_email automatically.`;
+
 const PSEUDO = `// Your client app (pseudo-code)
 const t = localStorage.get("wnx_token");
 let ok = false;
@@ -80,6 +99,7 @@ try {
 
 const SECTIONS = [
   { id: 'auth', label: 'Authentication' },
+  { id: 'mint', label: 'POST /mint' },
   { id: 'activate', label: 'POST /activate' },
   { id: 'validate', label: 'POST /validate' },
   { id: 'deactivate', label: 'POST /deactivate' },
@@ -130,6 +150,17 @@ export default function Docs() {
               Keys are revealed once at creation time and stored hashed-feeling on the server.
               Revoke any leaked key from the API Keys admin page.
             </p>
+          </section>
+
+          <section id="mint">
+            <h2 className="text-xl font-semibold mb-3">POST /api/integrate/mint</h2>
+            <p className="text-sm text-muted-foreground mb-3">
+              Call this from your website’s backend after a successful purchase (payment handled on your side, e.g. Stripe).
+              The server generates a signed serial, stores it, and emails it to the buyer. Pick a product by
+              <code className="font-mono mx-1">product_id</code> or <code className="font-mono mx-1">product_slug</code>.
+            </p>
+            <CodeBlock testid="docs-mint-curl" filename="curl" code={CURL_MINT} />
+            <CodeBlock testid="docs-mint-response" filename="response" className="mt-3" code={MINT_RES} />
           </section>
 
           <section id="activate">
@@ -185,12 +216,9 @@ export default function Docs() {
           <section id="webhooks">
             <h2 className="text-xl font-semibold mb-3">Webhooks</h2>
             <p className="text-sm text-muted-foreground">
-              Point your store at one of these endpoints. Requests are signature-verified per provider; duplicates are ignored.
+              Point your Stripe account at this endpoint. Requests are signature-verified; duplicates are ignored.
             </p>
             <ul className="mt-3 space-y-1 text-sm font-mono">
-              <li>POST <span className="text-emerald-400">/api/webhooks/lemonsqueezy</span> &nbsp; (header <code>X-Signature</code> = HMAC-SHA256 of body)</li>
-              <li>POST <span className="text-emerald-400">/api/webhooks/paddle</span> &nbsp; (header <code>Paddle-Signature: ts=...;h1=...</code>)</li>
-              <li>POST <span className="text-emerald-400">/api/webhooks/gumroad</span> &nbsp; (header <code>X-Gumroad-Signature</code> = HMAC-SHA256 of body)</li>
               <li>POST <span className="text-emerald-400">/api/webhooks/stripe</span> &nbsp; (header <code>Stripe-Signature: t=...,v1=...</code>)</li>
             </ul>
           </section>

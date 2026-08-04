@@ -86,7 +86,7 @@ export default function AdminLogin() {
           <ul className="mt-8 space-y-3 text-sm">
             <li className="flex items-start gap-3"><ShieldCheck className="h-4 w-4 text-emerald-400 mt-0.5" /> HMAC + RSA signing per product</li>
             <li className="flex items-start gap-3"><KeyRound className="h-4 w-4 text-emerald-400 mt-0.5" /> Bulk import licenses from CSV</li>
-            <li className="flex items-start gap-3"><Webhook className="h-4 w-4 text-emerald-400 mt-0.5" /> Webhook events for Lemon Squeezy, Paddle, Gumroad</li>
+            <li className="flex items-start gap-3"><Webhook className="h-4 w-4 text-emerald-400 mt-0.5" /> Website-triggered serial minting (Stripe-ready webhooks)</li>
           </ul>
         </div>
       </div>

@@ -23,7 +23,7 @@ const FEATURES = [
   { icon: ShieldCheck, title: 'Activate', desc: 'Hardware + domain fingerprinting, configurable per product.' },
   { icon: Activity, title: 'Validate', desc: 'Online + offline grace tokens so flaky networks don’t lock paying customers out.' },
   { icon: FileBarChart2, title: 'Audit', desc: 'Every issue, revoke, and activation is recorded with actor & severity.' },
-  { icon: Webhook, title: 'Webhooks', desc: 'Lemon Squeezy, Paddle, Gumroad signatures verified, idempotent issuance.' },
+  { icon: Webhook, title: 'Sell', desc: 'Your website handles checkout; a server-to-server mint call issues the serial and emails it.' },
   { icon: Lock, title: 'Operate', desc: 'API key auth, rate limiting, daily DB backups baked in.' },
 ];
 

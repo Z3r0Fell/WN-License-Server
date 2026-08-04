@@ -4,7 +4,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 from auth import get_api_key
 from audit import log as audit_log
@@ -15,6 +15,7 @@ from db import db, now_iso, serialize_doc
 
 import os
 
+from routers.admin import _create_license
 from routers.subscriptions import resolve_subscription_status
 
 router = APIRouter(prefix="/integrate", tags=["integrate"])
@@ -38,6 +39,17 @@ class DeactivateIn(BaseModel):
     license_key: Optional[str] = None
     hardware_id: Optional[str] = None
     domain: Optional[str] = None
+
+
+class MintIn(BaseModel):
+    """Website -> license server: mint a serial after a successful purchase."""
+    customer_email: EmailStr
+    product_id: Optional[str] = None
+    product_slug: Optional[str] = None
+    plan: str = "standard"
+    seats: int = Field(default=1, ge=1, le=100)
+    expires_at: Optional[str] = None
+    notes: Optional[str] = None
 
 
 async def _resolve_license(key: str) -> dict | None:
@@ -219,6 +231,34 @@ async def deactivate(body: DeactivateIn, request: Request, api_key=Depends(get_a
                     "activation.deactivate", "activation", activation_id, severity="warning",
                     ip=_client_ip(request))
     return {"ok": True, "activation_id": activation_id}
+
+
+@router.post("/mint")
+async def mint(body: MintIn, request: Request, api_key=Depends(get_api_key)):
+    """Server-to-server: mint a license serial for a completed website purchase
+    and email it to the buyer. Use either product_id or product_slug."""
+    product = None
+    if body.product_id:
+        product = await db.products.find_one({"id": body.product_id}, {"_id": 0})
+    if not product and body.product_slug:
+        product = await db.products.find_one({"slug": body.product_slug}, {"_id": 0})
+    if not product:
+        raise HTTPException(400, "Invalid product_id or product_slug")
+
+    doc = await _create_license(
+        product_id=product["id"],
+        customer_email=str(body.customer_email),
+        plan=body.plan,
+        seats=body.seats,
+        expires_at=body.expires_at,
+        notes=body.notes,
+        source="website",
+    )
+    await audit_log("integrator", api_key.get("id"), api_key.get("name"),
+                    "license.mint", "license", doc["id"],
+                    meta={"product": doc["product_slug"], "email": str(body.customer_email)},
+                    ip=_client_ip(request))
+    return serialize_doc(doc)
 
 
 @router.get("/rsa-public-key")

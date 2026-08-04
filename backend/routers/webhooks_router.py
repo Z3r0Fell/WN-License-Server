@@ -1,4 +1,4 @@
-"""Webhook receiver routes for Lemon Squeezy / Paddle / Gumroad / Stripe."""
+"""Webhook receiver routes for Stripe."""
 import json
 import logging
 import os
@@ -12,11 +12,7 @@ from db import db, now_iso
 from email_sender import render_purchase_email, send_email
 import runtime_settings
 from routers.subscriptions import _subscription_sync_licenses
-from webhooks_sig import (
-    extract_email_gumroad, extract_email_lemonsqueezy, extract_email_paddle,
-    extract_email_stripe, verify_gumroad, verify_lemonsqueezy, verify_paddle,
-    verify_stripe,
-)
+from webhooks_sig import extract_email_stripe, verify_stripe
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 logger = logging.getLogger("watchnexus.webhooks")
@@ -288,148 +284,6 @@ async def _provision_license(email: str | None, product_slug_hint: str | None,
                         "license", license_id, severity="error", meta={"error": str(e)})
 
     return license_id
-
-
-# ---------------- Lemon Squeezy ----------------
-@router.post("/lemonsqueezy")
-async def lemonsqueezy(request: Request):
-    body = await request.body()
-    sig = request.headers.get("x-signature", "")
-    secret = runtime_settings.get("LEMONSQUEEZY_WEBHOOK_SECRET")
-    if not verify_lemonsqueezy(body, sig, secret):
-        await _store_event("lemonsqueezy", "unknown", "signature_invalid", body, None,
-                           error="signature mismatch")
-        raise HTTPException(401, "Invalid signature")
-    try:
-        payload = json.loads(body)
-    except Exception as e:
-        await _store_event("lemonsqueezy", "unknown", "parse_error", body, None, error=str(e))
-        raise HTTPException(400, "Invalid JSON")
-    event_type = payload.get("meta", {}).get("event_name", "unknown")
-    provider_event_id = payload.get("meta", {}).get("event_id") or payload.get("data", {}).get("id")
-    if await _is_duplicate("lemonsqueezy", provider_event_id):
-        await _store_event("lemonsqueezy", event_type, "duplicate", body, payload,
-                           provider_event_id=provider_event_id)
-        return {"ok": True, "duplicate": True}
-    license_id = None
-    subscription_id = None
-    if event_type in ("order_created", "subscription_created", "subscription_payment_success"):
-        email = extract_email_lemonsqueezy(payload)
-        product_slug = payload.get("meta", {}).get("custom_data", {}).get("product_slug")
-        data = payload.get("data", {})
-        attrs = data.get("attributes", {}) if isinstance(data, dict) else {}
-        if event_type.startswith("subscription_"):
-            provider_sub_id = data.get("id")
-            billing_period = "monthly"
-            total = attrs.get("total", 0) or 0
-            price = float(total) / 100 if total else 0
-            subscription_id = await _provision_subscription(
-                email, product_slug, plan="lemonsqueezy", source="lemonsqueezy",
-                provider_sub_id=provider_sub_id, billing_period=billing_period,
-                price=price, currency="USD")
-        else:
-            license_id = await _provision_license(email, product_slug, plan="lemonsqueezy",
-                                                   source="lemonsqueezy")
-    await _store_event("lemonsqueezy", event_type, "processed", body, payload,
-                       provider_event_id=provider_event_id, license_id=license_id)
-    return {"ok": True, "license_id": license_id, "subscription_id": subscription_id}
-
-
-# ---------------- Paddle ----------------
-@router.post("/paddle")
-async def paddle(request: Request):
-    body = await request.body()
-    sig = request.headers.get("paddle-signature", "")
-    secret = runtime_settings.get("PADDLE_WEBHOOK_SECRET")
-    if not verify_paddle(body, sig, secret):
-        await _store_event("paddle", "unknown", "signature_invalid", body, None,
-                           error="signature mismatch or expired")
-        raise HTTPException(401, "Invalid signature")
-    try:
-        payload = json.loads(body)
-    except Exception as e:
-        await _store_event("paddle", "unknown", "parse_error", body, None, error=str(e))
-        raise HTTPException(400, "Invalid JSON")
-    event_type = payload.get("event_type", "unknown")
-    provider_event_id = payload.get("event_id") or payload.get("notification_id")
-    if await _is_duplicate("paddle", provider_event_id):
-        await _store_event("paddle", event_type, "duplicate", body, payload,
-                           provider_event_id=provider_event_id)
-        return {"ok": True, "duplicate": True}
-    license_id = None
-    subscription_id = None
-    if event_type in ("transaction.completed", "subscription.created", "subscription.activated"):
-        email = extract_email_paddle(payload)
-        d = payload.get("data") or {}
-        product_slug = (d.get("custom_data") or {}).get("product_slug") if isinstance(d, dict) else None
-        if event_type.startswith("subscription_"):
-            provider_sub_id = d.get("id") if isinstance(d, dict) else None
-            items = (d.get("items", []) if isinstance(d, dict) else [])
-            price = 0
-            billing_period = "monthly"
-            if items and isinstance(items, list):
-                first = items[0] if items else {}
-                price_data = (first.get("price") or {}) if isinstance(first, dict) else {}
-                unit_price = (price_data.get("unit_price") or {}) if isinstance(price_data, dict) else {}
-                price = float(unit_price.get("amount", 0) or 0) / 100
-                interval = (price_data.get("billing_cycle") or {}).get("interval", "month")
-                billing_period = "monthly" if interval == "month" else "yearly" if interval == "year" else interval
-            subscription_id = await _provision_subscription(
-                email, product_slug, plan="paddle", source="paddle",
-                provider_sub_id=provider_sub_id, billing_period=billing_period,
-                price=price, currency="USD")
-        else:
-            license_id = await _provision_license(email, product_slug, plan="paddle", source="paddle")
-    await _store_event("paddle", event_type, "processed", body, payload,
-                       provider_event_id=provider_event_id, license_id=license_id)
-    return {"ok": True, "license_id": license_id, "subscription_id": subscription_id}
-
-
-# ---------------- Gumroad ----------------
-@router.post("/gumroad")
-async def gumroad(request: Request):
-    body = await request.body()
-    sig = request.headers.get("x-gumroad-signature", "")
-    secret = runtime_settings.get("GUMROAD_WEBHOOK_SECRET")
-    if not verify_gumroad(body, sig, secret):
-        await _store_event("gumroad", "unknown", "signature_invalid", body, None,
-                           error="signature mismatch")
-        raise HTTPException(401, "Invalid signature")
-    try:
-        payload = json.loads(body)
-    except Exception:
-        from urllib.parse import parse_qs
-        try:
-            qs = parse_qs(body.decode("utf-8", errors="replace"))
-            payload = {k: v[0] if isinstance(v, list) and len(v) == 1 else v for k, v in qs.items()}
-        except Exception as e:
-            await _store_event("gumroad", "unknown", "parse_error", body, None, error=str(e))
-            raise HTTPException(400, "Invalid body")
-    event_type = payload.get("resource_name") or payload.get("event") or "sale"
-    provider_event_id = payload.get("sale_id") or payload.get("id")
-    if await _is_duplicate("gumroad", provider_event_id):
-        await _store_event("gumroad", event_type, "duplicate", body, payload,
-                           provider_event_id=provider_event_id)
-        return {"ok": True, "duplicate": True}
-    email = extract_email_gumroad(payload)
-    product_slug = payload.get("product_permalink") or payload.get("product_id")
-    license_id = None
-    subscription_id = None
-    if event_type in ("subscription_created", "subscription_updated", "subscription_cancelled",
-                      "subscription_restarted"):
-        provider_sub_id = payload.get("subscription_id") or payload.get("id")
-        price = float(payload.get("price", 0) or 0)
-        billing_period = "monthly" if payload.get("subscription_duration") == "monthly" else \
-                         "yearly" if payload.get("subscription_duration") == "yearly" else "monthly"
-        subscription_id = await _provision_subscription(
-            email, product_slug, plan="gumroad", source="gumroad",
-            provider_sub_id=provider_sub_id, billing_period=billing_period,
-            price=price, currency="USD")
-    else:
-        license_id = await _provision_license(email, product_slug, plan="gumroad", source="gumroad")
-    await _store_event("gumroad", event_type, "processed", body, payload,
-                       provider_event_id=provider_event_id, license_id=license_id)
-    return {"ok": True, "license_id": license_id, "subscription_id": subscription_id}
 
 
 # ---------------- Stripe ----------------

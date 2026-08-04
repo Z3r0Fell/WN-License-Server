@@ -46,6 +46,7 @@ RATE_RULES: list[tuple[str, int, int]] = [
     ("/api/integrate/activate",     60, 60),    # ~1/sec sustained
     ("/api/integrate/validate",     600, 60),   # heartbeats are common
     ("/api/integrate/deactivate",   30, 60),
+    ("/api/integrate/mint",         30, 60),    # website purchase webhooks
     ("/api/webhooks",               300, 60),   # bursts from providers
 ]
 

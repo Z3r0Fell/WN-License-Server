@@ -3,7 +3,7 @@
 ## 1) Objectives
 - Prove the **core licensing cryptography + activation/validation** flow works end-to-end in isolation (no app yet).
 - Build an MVP server + UI that supports: products, licenses, activations, audit trail, builds, API keys, and customer portal.
-- Integrate **webhook receivers** for **Lemon Squeezy, Paddle, Gumroad** (verify signatures, issue licenses).
+- Integrate a **Stripe webhook receiver** (verify signatures, issue licenses) plus a server-to-server **mint endpoint** for website-triggered serial issuance.
 - Ensure ops readiness: **rate limiting**, server-to-server **API key auth**, webhook event logging, and **daily backups**.
 - **(Added / achieved)** Provide a **repeatable dual-domain deployment** (admin + customer portal hostnames) with one-command Ubuntu installer, documented ops, and TLS.
 - **(Added / achieved)** Support **runtime-editable secrets** (webhooks/email) via Admin UI without service restarts.
@@ -16,16 +16,16 @@
 2. As an integrator, I can generate and verify an **RSA-signed** license key using public-key verification.
 3. As an integrator, I can **activate** a license with a fingerprint and receive a signed token.
 4. As an integrator, I can **validate** a token and keep working during a short **offline grace** window.
-5. As ops, I can verify webhook signatures for **Lemon Squeezy/Paddle/Gumroad** and parse core fields.
+5. As ops, I can verify **Stripe** webhook signatures and parse core fields, or mint a serial server-to-server after website checkout.
 
 **Steps**
-1. Web search + notes: current webhook signature verification docs for Lemon Squeezy, Paddle, Gumroad; token best practices (JWT claims, clock skew).
+1. Web search + notes: current Stripe webhook signature verification docs; token best practices (JWT claims, clock skew).
 2. Create `poc/test_core.py` (single script) implementing:
    - HMAC license format + verify
    - RSA license format + verify (cryptography)
    - Activation token signing (PyJWT) with `exp` + `grace_until`, plus fingerprint binding
    - Validate routine: pass if token valid OR within grace window; fail otherwise
-   - Webhook signature verification functions for the 3 processors + sample payload fixtures
+   - Webhook signature verification function for Stripe + sample payload fixture
 3. Run locally; iterate until all assertions pass; document formats and edge cases in `poc/README.md`.
 
 **Exit criteria**
@@ -56,8 +56,8 @@
 7. Endpoints (MVP subset, but complete core flows):
    - Admin: login/me; products CRUD; licenses CRUD + revoke/extend; license activations list + deactivate; audit list; api-keys CRUD; builds CRUD; webhook events list
    - Customer: register/login/me; licenses list; deactivate activation; builds list
-   - Integrator: activate/validate/deactivate
-   - Webhooks: `/webhooks/lemonsqueezy`, `/webhooks/paddle`, `/webhooks/gumroad` (verify signature, idempotency, create/find customer by email, issue license)
+   - Integrator: activate/validate/deactivate/mint
+   - Webhooks: `/webhooks/stripe` (verify signature, idempotency, create/find customer by email, issue license)
    - Health: `/health`
 8. Audit logging: record admin/customer/integrator actions that mutate licenses/activations/api keys/builds.
 9. Webhook idempotency: store provider event id; ignore duplicates; persist raw payload.
@@ -158,7 +158,7 @@
 - Tests: iteration 5 at **100%** for both backend and frontend.
 
 ## Next Actions (future phases on demand)
-1. Email delivery on purchase (SendGrid/SMTP) when user opts in.
+1. Email delivery on purchase (SendGrid/SMTP) — done via `email_sender.py`; extend templates/branding as needed.
 2. Additional webhook providers / refinement (as needed) and provider-specific event mapping.
 3. Per-route rate limiting tuning + IP allowlists hardening.
 4. Deployment enhancements (optional): staging env, log aggregation, offsite backups, Cloudflare/Access docs.

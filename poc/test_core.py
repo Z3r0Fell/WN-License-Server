@@ -8,9 +8,7 @@ Tests:
 2. RSA license key generation + verification (asymmetric, offline verifiable)
 3. Activation token issuance + validation with offline grace period
 4. Webhook signature verification for:
-   - Lemon Squeezy (HMAC-SHA256 of raw body, header `X-Signature`)
-   - Paddle (HMAC-SHA256 of `{ts}:{body}` with header `Paddle-Signature: ts=...;h1=...`)
-   - Gumroad Resource Subscription (HMAC-SHA256 of raw body, header `X-Gumroad-Signature`)
+   - Stripe (HMAC-SHA256 of `{t}.{body}` with header `Stripe-Signature: t=...;v1=...`)
 5. Fingerprint binding logic (HW + Domain modes)
 
 Run: `python test_core.py`
@@ -267,70 +265,41 @@ def test_fingerprint():
 
 
 # ---------------------------------------------------------------------------
-# 4. Webhook signature verification
+# 4. Webhook signature verification (Stripe)
 # ---------------------------------------------------------------------------
-def verify_lemonsqueezy(body: bytes, signature_hdr: str, secret: str) -> bool:
-    """Lemon Squeezy: HMAC-SHA256 of the raw body, hex digest in `X-Signature` header."""
-    expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature_hdr or "")
-
-
-def verify_paddle(body: bytes, signature_hdr: str, secret: str, max_age_seconds: int = 300) -> bool:
-    """Paddle (Billing): `Paddle-Signature` is `ts=...;h1=...`. h1 = HMAC-SHA256(secret, "{ts}:{body}")."""
+def verify_stripe(body: bytes, signature_hdr: str, secret: str, max_age_seconds: int = 300) -> bool:
+    """Stripe: `Stripe-Signature` is `t=...;v1=...`. v1 = HMAC-SHA256(secret, "{t}.{body}")."""
     if not signature_hdr:
         return False
-    parts = dict(p.split("=", 1) for p in signature_hdr.split(";") if "=" in p)
-    ts = parts.get("ts")
-    h1 = parts.get("h1")
-    if not ts or not h1:
+    parts = dict(p.split("=", 1) for p in signature_hdr.split(",") if "=" in p)
+    ts = parts.get("t")
+    v1 = parts.get("v1")
+    if not ts or not v1:
         return False
     if abs(int(time.time()) - int(ts)) > max_age_seconds:
         return False
-    payload = f"{ts}:".encode() + body
+    payload = f"{ts}.".encode() + body
     expected = hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, h1)
-
-
-def verify_gumroad(body: bytes, signature_hdr: str, secret: str) -> bool:
-    """Gumroad Resource Subscriptions: HMAC-SHA256 hex digest in `X-Gumroad-Signature`."""
-    expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature_hdr or "")
+    return hmac.compare_digest(expected, v1)
 
 
 def test_webhooks():
-    # Lemon Squeezy
-    secret_ls = "ls_test_secret"
-    body_ls = json.dumps({
-        "meta": {"event_name": "order_created"},
-        "data": {"attributes": {"user_email": "buyer@example.com", "first_order_item": {"variant_id": 123}}}
+    secret_st = "whsec_test_secret"
+    body_st = json.dumps({
+        "id": "evt_1",
+        "type": "checkout.session.completed",
+        "data": {"object": {"customer_email": "buyer@example.com", "id": "cs_1"}},
     }).encode()
-    sig_ls = hmac.new(secret_ls.encode(), body_ls, hashlib.sha256).hexdigest()
-    assert verify_lemonsqueezy(body_ls, sig_ls, secret_ls)
-    assert not verify_lemonsqueezy(body_ls, "bad", secret_ls)
-    assert not verify_lemonsqueezy(body_ls, sig_ls, "wrong-secret")
-    print("✓ Lemon Squeezy webhook signature verification works")
-
-    # Paddle
-    secret_pd = "pdl_test_secret"
-    body_pd = json.dumps({"event_type": "transaction.completed", "data": {"id": "txn_1", "customer_email": "buyer@example.com"}}).encode()
     ts = str(int(time.time()))
-    h1 = hmac.new(secret_pd.encode(), f"{ts}:".encode() + body_pd, hashlib.sha256).hexdigest()
-    sig_pd = f"ts={ts};h1={h1}"
-    assert verify_paddle(body_pd, sig_pd, secret_pd)
-    assert not verify_paddle(body_pd, sig_pd, "wrong")
+    v1 = hmac.new(secret_st.encode(), f"{ts}.".encode() + body_st, hashlib.sha256).hexdigest()
+    sig_st = f"t={ts},v1={v1}"
+    assert verify_stripe(body_st, sig_st, secret_st)
+    assert not verify_stripe(body_st, sig_st, "wrong")
     # Replay too old
     old_ts = str(int(time.time()) - 10_000)
-    old_h1 = hmac.new(secret_pd.encode(), f"{old_ts}:".encode() + body_pd, hashlib.sha256).hexdigest()
-    assert not verify_paddle(body_pd, f"ts={old_ts};h1={old_h1}", secret_pd)
-    print("✓ Paddle webhook signature verification (with replay protection) works")
-
-    # Gumroad
-    secret_gr = "gum_test_secret"
-    body_gr = json.dumps({"sale_id": "S1", "email": "buyer@example.com", "product_id": "P1"}).encode()
-    sig_gr = hmac.new(secret_gr.encode(), body_gr, hashlib.sha256).hexdigest()
-    assert verify_gumroad(body_gr, sig_gr, secret_gr)
-    assert not verify_gumroad(body_gr, "wrong", secret_gr)
-    print("✓ Gumroad webhook signature verification works")
+    old_v1 = hmac.new(secret_st.encode(), f"{old_ts}.".encode() + body_st, hashlib.sha256).hexdigest()
+    assert not verify_stripe(body_st, f"t={old_ts},v1={old_v1}", secret_st)
+    print("✓ Stripe webhook signature verification (with replay protection) works")
 
 
 # ---------------------------------------------------------------------------
