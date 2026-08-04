@@ -1,7 +1,6 @@
 """Webhook receiver routes for Stripe."""
 import json
 import logging
-import os
 import uuid
 from typing import Any
 
@@ -160,19 +159,15 @@ async def _provision_subscription(email: str | None, product_slug_hint: str | No
                           "price": price})
 
     # Auto-provision a license for the subscription
-    from crypto_core import generate_hmac_license, generate_rsa_license
+    from crypto_core import generate_license_key
     license_id = str(uuid.uuid4())
-    if product["signing_method"] == "rsa":
-        key = generate_rsa_license(license_id, product["slug"])
-    else:
-        secret = os.environ.get("HMAC_LICENSE_SECRET", "dev").encode()
-        key = generate_hmac_license(license_id, product["slug"], secret)
+    key = generate_license_key(sub_plan.get("slug", "standard"))
     lic_doc = {
         "id": license_id,
         "key": key,
         "product_id": product["id"],
         "product_slug": product["slug"],
-        "signing_method": product["signing_method"],
+        "signing_method": "short",
         "fingerprint_mode": product["fingerprint_mode"],
         "customer_email": email.lower(),
         "customer_id": customer["id"] if customer else None,
@@ -228,13 +223,9 @@ async def _provision_license(email: str | None, product_slug_hint: str | None,
         product = await db.products.find_one({}, {"_id": 0}, sort=[("created_at", 1)])
     if not product:
         return None
-    from crypto_core import generate_hmac_license, generate_rsa_license
+    from crypto_core import generate_license_key
     license_id = str(uuid.uuid4())
-    if product["signing_method"] == "rsa":
-        key = generate_rsa_license(license_id, product["slug"])
-    else:
-        secret = os.environ.get("HMAC_LICENSE_SECRET", "dev").encode()
-        key = generate_hmac_license(license_id, product["slug"], secret)
+    key = generate_license_key(plan)
     customer = await db.customers.find_one({"email": email.lower()}, {"_id": 0})
     seats = product.get("max_seats_default", 1)
     doc = {
@@ -242,7 +233,7 @@ async def _provision_license(email: str | None, product_slug_hint: str | None,
         "key": key,
         "product_id": product["id"],
         "product_slug": product["slug"],
-        "signing_method": product["signing_method"],
+        "signing_method": "short",
         "fingerprint_mode": product["fingerprint_mode"],
         "customer_email": email.lower(),
         "customer_id": customer["id"] if customer else None,

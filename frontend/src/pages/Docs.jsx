@@ -7,7 +7,7 @@ const ACTIVATE = `POST  /api/integrate/activate
 Header  X-API-Key: <your-key>
 Body:
 {
-  "license_key":  "WNX-...",
+  "license_key":  "WNX-PRO-AB12-CD34-EF56",   // serial from your store/email
   "hardware_id":  "01:23:45:67:89:AB",   // optional, depends on product
   "domain":       "customer.com",         // optional, depends on product
   "device_name":  "Marie’s MacBook Pro"   // optional, friendly label
@@ -52,7 +52,7 @@ Body:
 const CURL_ACTIVATE = `curl -X POST "$WATCHNEXUS_URL/api/integrate/activate" \\
   -H "X-API-Key: $WATCHNEXUS_API_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"license_key":"WNX-...","hardware_id":"01:23","domain":"customer.com","device_name":"laptop"}'`;
+  -d '{"license_key":"WNX-PRO-AB12-CD34-EF56","hardware_id":"01:23","domain":"customer.com","device_name":"laptop"}'`;
 
 const CURL_VALIDATE = `curl -X POST "$WATCHNEXUS_URL/api/integrate/validate" \\
   -H "X-API-Key: $WATCHNEXUS_API_KEY" \\
@@ -67,15 +67,15 @@ const CURL_DEACT = `curl -X POST "$WATCHNEXUS_URL/api/integrate/deactivate" \\
 const CURL_MINT = `curl -X POST "$WATCHNEXUS_URL/api/integrate/mint" \\
   -H "X-API-Key: $WATCHNEXUS_API_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"customer_email":"buyer@example.com","product_slug":"watchnexus-pro","plan":"standard","seats":1}'`;
+  -d '{"customer_email":"buyer@example.com","product_slug":"watchnexus-pro","plan":"pro","seats":1}'`;
 
 const MINT_RES = `200 OK
 {
   "id":            "f7d5...-...",
-  "key":           "WNX-...",
+  "key":           "WNX-PRO-AB12-CD34-EF56",
   "product_id":    "...",
   "product_slug":  "watchnexus-pro",
-  "plan":          "standard",
+  "plan":          "pro",
   "seats":         1,
   "expires_at":    null,
   "status":        "active",

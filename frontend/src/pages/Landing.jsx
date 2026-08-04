@@ -12,7 +12,7 @@ const ACTIVATE_CURL = `curl -X POST $WATCHNEXUS_URL/api/integrate/activate \\
   -H "X-API-Key: $WATCHNEXUS_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "license_key": "WNX-...",
+    "license_key": "WNX-PRO-AB12-CD34-EF56",
     "hardware_id": "01:23:45:67:89:AB",
     "domain":      "customer.com",
     "device_name": "Marie\u2019s MacBook Pro"

@@ -1,6 +1,5 @@
 """Subscription plans + subscriptions (admin + customer routes).
 Coexists with the perpetual license matrix."""
-import os
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -279,7 +278,7 @@ class SubscriptionAddLicenseIn(BaseModel):
 async def subscription_add_license(sid: str, body: SubscriptionAddLicenseIn,
                                     request: Request,
                                     admin=Depends(require_admin_role("admin"))):
-    from crypto_core import generate_hmac_license, generate_rsa_license
+    from crypto_core import generate_license_key
     sub = await db.subscriptions.find_one({"id": sid}, {"_id": 0})
     if not sub:
         raise HTTPException(404, "Subscription not found")
@@ -287,17 +286,13 @@ async def subscription_add_license(sid: str, body: SubscriptionAddLicenseIn,
     if not product:
         raise HTTPException(400, "Linked product not found")
     license_id = str(uuid.uuid4())
-    if product["signing_method"] == "rsa":
-        key = generate_rsa_license(license_id, product["slug"])
-    else:
-        secret = os.environ.get("HMAC_LICENSE_SECRET", "dev").encode()
-        key = generate_hmac_license(license_id, product["slug"], secret)
+    key = generate_license_key(sub.get("plan_slug", "standard"))
     doc = {
         "id": license_id,
         "key": key,
         "product_id": product["id"],
         "product_slug": product["slug"],
-        "signing_method": product["signing_method"],
+        "signing_method": "short",
         "fingerprint_mode": product["fingerprint_mode"],
         "customer_email": sub["customer_email"],
         "customer_id": sub.get("customer_id"),

@@ -332,6 +332,29 @@ def test_e2e_flow():
 
 
 # ---------------------------------------------------------------------------
+# 6. Short serial (v2) — WNX-<TIER>-XXXX-XXXX-XXXX
+# ---------------------------------------------------------------------------
+def test_short_serial():
+    import sys, os as _os
+    sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "backend"))
+    from crypto_core import generate_license_key, is_short_license_key
+
+    for plan, prefix in [("pro", "PRO"), ("ultra", "ULT"), ("sub:ultra", "ULT"),
+                         ("standard", "STD"), ("demo", "STD")]:
+        key = generate_license_key(plan)
+        assert len(key) == 22, key
+        assert key.startswith(f"WNX-{prefix}-"), key
+        assert is_short_license_key(key)
+    # Uniqueness
+    keys = {generate_license_key("pro") for _ in range(20)}
+    assert len(keys) == 20
+    # Format rejects junk
+    assert not is_short_license_key("WNX-PRO-ABC")
+    assert not is_short_license_key("nope")
+    print("✓ Short serial format (WNX-<TIER>-XXXX-XXXX-XXXX) works")
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
@@ -342,6 +365,7 @@ if __name__ == "__main__":
     test_activation_token()
     test_fingerprint()
     test_webhooks()
+    test_short_serial()
     test_e2e_flow()
     print("=" * 50)
     print("ALL CORE TESTS PASSED ✓")

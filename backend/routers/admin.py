@@ -14,7 +14,7 @@ from pydantic import BaseModel, EmailStr, Field
 from auth import (get_current_admin, hash_password, verify_password,
                   require_admin_role, issue_session_token)
 from audit import log as audit_log
-from crypto_core import (generate_hmac_license, generate_rsa_license,
+from crypto_core import (compute_fingerprint, generate_license_key,
                          get_rsa_public_pem)
 from db import db, now_iso, serialize_doc
 import jwt as _jwt
@@ -405,11 +405,7 @@ async def _create_license(product_id: str, customer_email: Optional[str],
     if not product:
         raise HTTPException(400, "Invalid product_id")
     license_id = str(uuid.uuid4())
-    if product["signing_method"] == "rsa":
-        key = generate_rsa_license(license_id, product["slug"])
-    else:
-        secret = os.environ.get("HMAC_LICENSE_SECRET", "dev").encode()
-        key = generate_hmac_license(license_id, product["slug"], secret)
+    key = generate_license_key(plan)
     customer_id = None
     if customer_email:
         c = await db.customers.find_one({"email": customer_email.lower()}, {"_id": 0})
@@ -420,7 +416,7 @@ async def _create_license(product_id: str, customer_email: Optional[str],
         "key": key,
         "product_id": product_id,
         "product_slug": product["slug"],
-        "signing_method": product["signing_method"],
+        "signing_method": "short",
         "fingerprint_mode": product["fingerprint_mode"],
         "customer_email": customer_email.lower() if customer_email else None,
         "customer_id": customer_id,

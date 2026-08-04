@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import os
+import secrets
 import time
 from pathlib import Path
 from typing import Optional
@@ -23,6 +24,38 @@ def _b32encode(data: bytes) -> str:
 def _b32decode(s: str) -> bytes:
     pad = "=" * (-len(s) % 8)
     return base64.b32decode(s + pad)
+
+
+# ---- Short serial (v2) ----
+# Format: WNX-<TIER>-XXXX-XXXX-XXXX (22 chars). No embedded signature — the
+# server validates the key against the DB on activation. The WatchNexus client
+# only trusts the license server's response, so a compact unguessable key is
+# sufficient (60-bit random payload).
+def license_tier_prefix(plan: str | None) -> str:
+    """Derive a human tier prefix from a plan name (mirrors WatchNexus plan→tier)."""
+    p = (plan or "").lower()
+    if "ult" in p:
+        return "ULT"
+    if "pro" in p:
+        return "PRO"
+    return "STD"
+
+
+def generate_license_key(plan: str = "standard") -> str:
+    """Generate a 22-char serial: WNX-<TIER>-XXXX-XXXX-XXXX."""
+    raw = _b32encode(secrets.token_bytes(8)).upper()[:12]
+    groups = "-".join(raw[i:i + 4] for i in range(0, 12, 4))
+    return f"WNX-{license_tier_prefix(plan)}-{groups}"
+
+
+def is_short_license_key(key: str) -> bool:
+    """Format check for the short serial (no signature verification)."""
+    try:
+        prefix, tier, g1, g2, g3 = key.split("-")
+    except (ValueError, AttributeError):
+        return False
+    return (prefix == "WNX" and len(tier) == 3 and
+            all(len(g) == 4 for g in (g1, g2, g3)))
 
 
 # ---- HMAC license ----

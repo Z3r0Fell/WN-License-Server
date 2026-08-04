@@ -9,11 +9,8 @@ from pydantic import BaseModel, EmailStr, Field
 from auth import get_api_key
 from audit import log as audit_log
 from crypto_core import (compute_fingerprint, get_rsa_public_pem,
-                         issue_activation_token, validate_activation_token,
-                         verify_hmac_license, verify_rsa_license)
+                         issue_activation_token, validate_activation_token)
 from db import db, now_iso, serialize_doc
-
-import os
 
 from routers.admin import _create_license
 from routers.subscriptions import resolve_subscription_status
@@ -53,15 +50,13 @@ class MintIn(BaseModel):
 
 
 async def _resolve_license(key: str) -> dict | None:
-    """Verify a license key signature and load the DB record."""
-    lic = await db.licenses.find_one({"key": key}, {"_id": 0})
-    if not lic:
+    """Load the DB record for a license key. Keys are validated by presence —
+    they are unguessable short serials (no embedded signature). Lookup is
+    case-insensitive (base32); stored keys are always uppercase."""
+    key = (key or "").strip().upper()
+    if not key:
         return None
-    if lic["signing_method"] == "rsa":
-        ok = verify_rsa_license(key)
-    else:
-        ok = verify_hmac_license(key, os.environ.get("HMAC_LICENSE_SECRET", "dev").encode())
-    return lic if ok else None
+    return await db.licenses.find_one({"key": key}, {"_id": 0})
 
 
 def _client_ip(request: Request) -> str | None:

@@ -174,7 +174,7 @@ async def on_startup():
     # something to talk to without any admin clicks. Rotate via admin UI later.
     import secrets
     import uuid
-    from crypto_core import generate_hmac_license, generate_rsa_license
+    from crypto_core import generate_license_key
     existing_boot = await db.api_keys.find_one({"is_bootstrap": True, "status": "active"})
     if not existing_boot:
         product = await db.products.find_one({"slug": "watchnexus-pro"}, {"_id": 0}) \
@@ -202,17 +202,13 @@ async def on_startup():
         # Demo license under the default product, no email, 3 seats
         if product:
             demo_id = str(uuid.uuid4())
-            if product["signing_method"] == "rsa":
-                demo_key = generate_rsa_license(demo_id, product["slug"])
-            else:
-                hmac_secret = os.environ.get("HMAC_LICENSE_SECRET", "dev").encode()
-                demo_key = generate_hmac_license(demo_id, product["slug"], hmac_secret)
+            demo_key = generate_license_key("demo")
             await db.licenses.insert_one({
                 "id": demo_id,
                 "key": demo_key,
                 "product_id": product["id"],
                 "product_slug": product["slug"],
-                "signing_method": product["signing_method"],
+                "signing_method": "short",
                 "fingerprint_mode": product["fingerprint_mode"],
                 "customer_email": None,
                 "customer_id": None,

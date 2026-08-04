@@ -18,8 +18,7 @@ from pydantic import BaseModel
 from auth import get_current_admin
 from audit import log as audit_log
 from crypto_core import (compute_fingerprint, issue_activation_token,
-                         validate_activation_token, verify_hmac_license,
-                         verify_rsa_license)
+                         validate_activation_token)
 from db import db, now_iso, serialize_doc
 
 router = APIRouter(prefix="/admin/quickstart", tags=["quickstart"])
@@ -71,26 +70,20 @@ async def _ensure_bootstrap_key() -> dict:
 
 async def _ensure_bootstrap_license(product: dict) -> dict:
     """Ensure a per-product bootstrap demo license exists. Creates lazily."""
-    from crypto_core import generate_hmac_license, generate_rsa_license
+    from crypto_core import generate_license_key
 
     existing = await _bootstrap_license_for_product(product["id"])
     if existing:
         return existing
 
     license_id = str(uuid.uuid4())
-    if product["signing_method"] == "rsa":
-        lic_key = generate_rsa_license(license_id, product["slug"])
-    else:
-        lic_key = generate_hmac_license(
-            license_id, product["slug"],
-            os.environ.get("HMAC_LICENSE_SECRET", "dev").encode(),
-        )
+    lic_key = generate_license_key("demo")
     doc = {
         "id": license_id,
         "key": lic_key,
         "product_id": product["id"],
         "product_slug": product["slug"],
-        "signing_method": product["signing_method"],
+        "signing_method": "short",
         "fingerprint_mode": product["fingerprint_mode"],
         "customer_email": None,
         "customer_id": None,
@@ -208,15 +201,6 @@ async def test_run(body: TestRunIn, request: Request, admin=Depends(get_current_
 
     if not lic:
         raise HTTPException(400, "License not found")
-
-    # Verify signature inline
-    if lic["signing_method"] == "rsa":
-        ok = verify_rsa_license(lic["key"])
-    else:
-        ok = verify_hmac_license(lic["key"],
-                                 os.environ.get("HMAC_LICENSE_SECRET", "dev").encode())
-    if not ok:
-        raise HTTPException(400, "License signature invalid")
 
     steps = []
     hw = (body.hardware_id or "01:23:45:67:89:AB") + ":" + secrets.token_hex(2)
