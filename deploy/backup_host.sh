@@ -9,7 +9,7 @@ set -Eeuo pipefail
 
 DEPLOY_DIR="${DEPLOY_DIR:-/opt/watchnexus/deploy}"
 RETENTION="${1:-14}"
-DB_NAME="$(grep -E '^DB_NAME=' "$DEPLOY_DIR/.env" 2>/dev/null | cut -d= -f2-)"
+DB_NAME="$(grep -E '^DB_NAME=' "$DEPLOY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)"
 DB_NAME="${DB_NAME:-watchnexus}"
 
 cd "$DEPLOY_DIR"

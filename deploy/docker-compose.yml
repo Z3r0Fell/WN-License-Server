@@ -58,6 +58,17 @@ services:
     depends_on: [web, backend]
     networks: [internal]
 
+  # One-shot cert renewal. Not started by `up -d`; run explicitly via:
+  #   docker compose run --rm certbot certbot renew --webroot -w /var/www/certbot --non-interactive
+  certbot:
+    image: certbot/certbot:latest
+    profiles: ["tools"]
+    volumes:
+      - /etc/letsencrypt:/etc/letsencrypt
+      - /var/log/letsencrypt:/var/log/letsencrypt
+      - certbot_webroot:/var/www/certbot
+    networks: [internal]
+
 volumes:
   mongo_data:
   rsa_keys:
