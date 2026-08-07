@@ -25,6 +25,13 @@ EDITABLE_KEYS: dict[str, dict] = {
     "STRIPE_WEBHOOK_SECRET":       {"category": "webhooks", "secret": True,
                                      "label": "Stripe webhook secret",
                                      "help": "From Stripe Dashboard \u2192 Developers \u2192 Webhooks. Starts with whsec_"},
+    # ---- Stripe ----
+    "STRIPE_SECRET_KEY":           {"category": "stripe", "secret": True,
+                                     "label": "Stripe secret key",
+                                     "help": "From Stripe Dashboard \u2192 Developers \u2192 API keys. Starts with sk_"},
+    "STRIPE_PUBLISHABLE_KEY":      {"category": "stripe", "secret": False,
+                                     "label": "Stripe publishable key",
+                                     "help": "From Stripe Dashboard \u2192 Developers \u2192 API keys. Starts with pk_"},
     # ---- Email ----
     "EMAIL_FROM":                  {"category": "email", "secret": False,
                                      "label": "From address",

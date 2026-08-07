@@ -155,6 +155,65 @@ async def orders_lookup(ref: str):
     return serialize_doc(order)
 
 
+# ── Stripe Checkout (additional payment option) ──────────────────────────────
+
+@router.post("/orders/{ref}/stripe-checkout")
+async def order_stripe_checkout(ref: str, request: Request):
+    """Create a Stripe Checkout Session for an order and return its hosted URL.
+
+    The buyer is redirected to checkout.stripe.com; on success Stripe fires
+    `checkout.session.completed` to /api/webhooks/stripe, which matches the
+    order via metadata and calls the same fulfill path as manual mark-paid."""
+    import requests
+
+    secret = runtime_settings.get("STRIPE_SECRET_KEY")
+    if not secret or not secret.startswith(("sk_", "rk_")):
+        raise HTTPException(503, "Stripe checkout is not configured yet")
+
+    order = await db.orders.find_one({"reference": ref.strip().upper()}, {"_id": 0})
+    if not order:
+        raise HTTPException(404, "Order not found")
+    if order["status"] != "pending_payment":
+        raise HTTPException(400, f"Order is {order['status']} - cannot pay for it")
+
+    public_url = (runtime_settings.get("APP_PUBLIC_URL")
+                  or "https://licenses.watchnexus.ca").rstrip("/")
+    amount_cents = int(round(float(order.get("price_cad", 0)) * 100))
+
+    data = {
+        "mode": "payment",
+        "customer_email": order["email"],
+        "line_items[0][quantity]": "1",
+        "line_items[0][price_data][currency]": order.get("currency", "cad").lower(),
+        "line_items[0][price_data][unit_amount]": str(amount_cents),
+        "line_items[0][price_data][product_data][name]": order.get("plan_name", "WatchNexus"),
+        "success_url": f"{public_url}/checkout?ref={order['reference']}&status=paid",
+        "cancel_url": f"{public_url}/checkout?ref={order['reference']}&status=canceled",
+        "metadata[order_ref]": order["reference"],
+        "metadata[plan]": order["plan"],
+    }
+    try:
+        r = requests.post(
+            "https://api.stripe.com/v1/checkout/sessions",
+            auth=(secret, ""),
+            data=data,
+            timeout=20,
+        )
+    except Exception as e:
+        raise HTTPException(502, f"Stripe request failed: {e}")
+    if r.status_code != 200:
+        raise HTTPException(502, f"Stripe error {r.status_code}: {r.text[:300]}")
+
+    sess = r.json()
+    await audit_log("system", None, order["email"], "order.stripe_checkout",
+                    "order", order["id"],
+                    meta={"reference": order["reference"],
+                          "stripe_session": sess.get("id")},
+                    severity="info", ip=_client_ip(request))
+    return {"url": sess["url"], "session_id": sess["id"]}
+
+
+
 # ── Admin: list + fulfill (mark paid -> issue serial + email) ────────────────
 
 @router.get(f"{admin_prefix}/orders")

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, ArrowRight, BadgeCheck, ListChecks, Lock, Mail, Copy, ExternalLink,
-  CreditCard, Loader2, RefreshCw, Search, ShieldCheck,
+  CreditCard, Loader2, RefreshCw, Search, ShieldCheck, Zap,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -77,6 +77,7 @@ export default function Checkout() {
   const [lookupRef, setLookupRef] = useState('');
   const [lookup, setLookup] = useState(null);
   const [lookupLoading, setLookupLoading] = useState(false);
+  const [stripeLoading, setStripeLoading] = useState(false);
 
   useEffect(() => {
     publicApi.get('/orders/plans')
@@ -136,6 +137,24 @@ export default function Checkout() {
       setLookup({ status: 'not_found', reference: ref });
     } finally {
       setLookupLoading(false);
+    }
+  };
+
+  const payWithStripe = async () => {
+    if (!order) return;
+    setStripeLoading(true);
+    setError('');
+    try {
+      const r = await publicApi.post(`/orders/${encodeURIComponent(order.reference)}/stripe-checkout`);
+      if (r.data && r.data.url) {
+        window.location.href = r.data.url;
+      } else {
+        setError('Stripe did not return a payment link. Please try again or pay manually.');
+        setStripeLoading(false);
+      }
+    } catch (e) {
+      setError(e?.response?.data?.detail || 'Could not start Stripe checkout. Please pay manually below.');
+      setStripeLoading(false);
     }
   };
 
@@ -220,7 +239,7 @@ export default function Checkout() {
                   Place order
                 </Button>
                 <p className="text-[11px] text-muted-foreground flex items-center justify-center gap-1">
-                  <Lock className="h-3 w-3" /> No payment card required — you'll pay directly by e-transfer or PayPal.
+                  <Lock className="h-3 w-3" /> Pay by card with Stripe, or later by e-transfer or PayPal.
                 </p>
               </CardContent>
             </Card>
@@ -262,9 +281,28 @@ export default function Checkout() {
                 </div>
               </div>
 
+              <div className="rounded-xl border border-indigo-500/25 bg-indigo-500/5 p-4">
+                <div className="flex items-center gap-2 text-sm font-semibold">
+                  <Zap className="h-4 w-4 text-indigo-400" /> Pay by card — instant serial
+                </div>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Pay <b>CAD {fmtPrice(order.price_cad)}</b> securely via Stripe. Your serial is issued automatically
+                  the moment payment clears.
+                </p>
+                <Button
+                  className="mt-3 w-full bg-indigo-600 hover:bg-indigo-500 text-white"
+                  onClick={payWithStripe}
+                  disabled={stripeLoading}
+                  data-testid="checkout-pay-stripe"
+                >
+                  {stripeLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+                  Pay with card
+                </Button>
+              </div>
+
               <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-4">
                 <div className="flex items-center gap-2 text-sm font-semibold">
-                  <CreditCard className="h-4 w-4 text-amber-400" /> How to pay
+                  <CreditCard className="h-4 w-4 text-amber-400" /> Or pay manually
                 </div>
                 <p className="mt-2 text-sm">
                   Send <b>CAD {fmtPrice(order.price_cad)}</b> to{' '}

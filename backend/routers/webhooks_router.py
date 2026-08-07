@@ -339,7 +339,27 @@ async def stripe(request: Request):
                 provider_sub_id=provider_sub_id, billing_period=billing_period,
                 price=price, currency="USD")
         else:
-            license_id = await _provision_license(email, product_slug, plan="stripe", source="stripe")
+            order_ref = meta.get("order_ref")
+            if order_ref:
+                from routers.orders import _fulfill_order
+                order = await db.orders.find_one(
+                    {"reference": str(order_ref).strip().upper()}, {"_id": 0})
+                if not order:
+                    await _store_event("stripe", event_type, "error", body, payload,
+                                       provider_event_id=provider_event_id,
+                                       error=f"order_ref {order_ref} not found")
+                    return {"ok": False, "error": "order not found"}
+                try:
+                    fulfilled = await _fulfill_order(
+                        order, notes="Paid via Stripe", actor_email="stripe:webhook")
+                    license_id = fulfilled.get("license_id")
+                except HTTPException as e:
+                    await _store_event("stripe", event_type, "error", body, payload,
+                                       provider_event_id=provider_event_id,
+                                       error=f"fulfill failed: {e.detail}")
+                    return {"ok": False, "error": e.detail}
+            else:
+                license_id = await _provision_license(email, product_slug, plan="stripe", source="stripe")
     await _store_event("stripe", event_type, "processed", body, payload,
                        provider_event_id=provider_event_id, license_id=license_id)
     return {"ok": True, "license_id": license_id, "subscription_id": subscription_id}
