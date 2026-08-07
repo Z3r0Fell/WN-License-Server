@@ -9,7 +9,7 @@ import {
 } from '../components/ui/tabs';
 import { toast } from 'sonner';
 import {
-  Save, Mail, Webhook, Globe2, Eye, EyeOff, AlertTriangle, MailCheck, Database, Cog, ShieldCheck,
+  Save, Mail, Webhook, Globe2, Eye, EyeOff, AlertTriangle, MailCheck, Database, Cog, ShieldCheck, CreditCard,
 } from 'lucide-react';
 
 const CATEGORY_META = {
@@ -21,6 +21,8 @@ const CATEGORY_META = {
               description: 'Public URLs and brand name used in customer-facing emails and links.' },
   security: { icon: ShieldCheck, label: 'Security',
               description: 'Restrict admin login by IP address. Leave the allowlist blank during initial setup.' },
+  checkout: { icon: CreditCard, label: 'Checkout',
+              description: 'Buyers pay the address below (e-transfer / PayPal) and you confirm in Admin \u2192 Orders. Prices shown on the checkout page.' },
 };
 
 function SourceTag({ source }) {
