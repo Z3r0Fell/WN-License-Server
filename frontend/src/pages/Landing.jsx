@@ -50,6 +50,7 @@ export default function Landing() {
             <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground hidden sm:inline">Licensing</span>
           </Link>
           <nav className="flex items-center gap-1">
+            <Link to="/checkout" className="text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-lg hover:bg-muted/40 transition-colors" data-testid="landing-buy-link">Buy</Link>
             <Link to="/docs" className="text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-lg hover:bg-muted/40 transition-colors" data-testid="landing-docs-link">Docs</Link>
             {portalIsExternal ? (
               <a href={portalHref} className="text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-lg hover:bg-muted/40 transition-colors" data-testid="landing-portal-link">Customer portal</a>

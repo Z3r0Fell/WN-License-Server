@@ -62,6 +62,22 @@ EDITABLE_KEYS: dict[str, dict] = {
     "ADMIN_LOGIN_IP_ALLOWLIST":    {"category": "security", "secret": False,
                                      "label": "Admin login IP allowlist",
                                      "help": "Comma-separated IPs or CIDR ranges allowed to call /api/admin/login. Leave blank to allow all. IPv4 + IPv6 supported. Example: 203.0.113.5, 198.51.100.0/24"},
+    # ---- Checkout (in-house purchase portal) ----
+    "CHECKOUT_PAYMENT_EMAIL":      {"category": "checkout", "secret": False,
+                                     "label": "Checkout payment email",
+                                     "help": "Address buyers pay to (e-transfer / PayPal). Shown on the checkout page. e.g. admin@watchnexus.ca"},
+    "CHECKOUT_PAYMENT_METHODS":    {"category": "checkout", "secret": False,
+                                     "label": "Accepted payment methods",
+                                     "help": "Free text, e.g. 'Interac e-Transfer (Canada) or PayPal'."},
+    "CHECKOUT_PAYMENT_INSTRUCTIONS": {"category": "checkout", "secret": False,
+                                     "label": "Payment instructions",
+                                     "help": "Step-by-step instructions shown to the buyer after placing an order."},
+    "CHECKOUT_PRO_PRICE_CAD":      {"category": "checkout", "secret": False,
+                                     "label": "Pro price (CAD, one-time)",
+                                     "help": "Shown on the checkout page and recorded on orders. Default 35."},
+    "CHECKOUT_ULTRA_PRICE_CAD":    {"category": "checkout", "secret": False,
+                                     "label": "Ultra price (CAD, one-time)",
+                                     "help": "Shown on the checkout page and recorded on orders. Default 60."},
 }
 
 _cache: dict[str, str] = {}

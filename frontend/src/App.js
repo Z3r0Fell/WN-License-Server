@@ -4,6 +4,7 @@ import { Toaster } from './components/ui/sonner';
 
 import Landing from './pages/Landing';
 import Docs from './pages/Docs';
+import Checkout from './pages/Checkout';
 import AdminLogin from './pages/AdminLogin';
 import AdminLayout from './components/AdminLayout';
 import AdminDashboard from './pages/AdminDashboard';
@@ -12,6 +13,7 @@ import AdminProducts from './pages/AdminProducts';
 import AdminLicenses from './pages/AdminLicenses';
 import AdminSubscriptions from './pages/AdminSubscriptions';
 import AdminSubscriptionPlans from './pages/AdminSubscriptionPlans';
+import AdminOrders from './pages/AdminOrders';
 import AdminCustomers from './pages/AdminCustomers';
 import AdminApiKeys from './pages/AdminApiKeys';
 import AdminBuilds from './pages/AdminBuilds';
@@ -57,6 +59,7 @@ function App() {
         <Routes>
           <Route path="/" element={<RootRedirect />} />
           <Route path="/docs" element={<Docs />} />
+          <Route path="/checkout" element={<Checkout />} />
 
           {/* Admin */}
           <Route path="/admin/login" element={<AdminLogin />} />
@@ -68,6 +71,7 @@ function App() {
             <Route path="licenses" element={<AdminLicenses />} />
             <Route path="subscriptions" element={<AdminSubscriptions />} />
             <Route path="subscription-plans" element={<AdminSubscriptionPlans />} />
+            <Route path="orders" element={<AdminOrders />} />
             <Route path="customers" element={<AdminCustomers />} />
             <Route path="api-keys" element={<AdminApiKeys />} />
             <Route path="builds" element={<AdminBuilds />} />

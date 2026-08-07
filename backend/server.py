@@ -26,6 +26,7 @@ from routers import admin as admin_router
 from routers import admin_users as admin_users_router
 from routers import customer as customer_router
 from routers import integrate as integrate_router
+from routers import orders as orders_router
 from routers import public as public_router
 from routers import quickstart as quickstart_router
 from routers import subscriptions as subscriptions_router
@@ -48,6 +49,7 @@ RATE_RULES: list[tuple[str, int, int]] = [
     ("/api/integrate/deactivate",   30, 60),
     ("/api/integrate/mint",         30, 60),    # website purchase webhooks
     ("/api/webhooks",               300, 60),   # bursts from providers
+    ("/api/orders",                 20, 60),    # purchase-portal order creation/lookup
 ]
 
 _buckets: dict[tuple[str, str], Deque[float]] = defaultdict(deque)
@@ -109,6 +111,7 @@ api.include_router(admin_users_router.public_router)
 api.include_router(quickstart_router.router)
 api.include_router(customer_router.router)
 api.include_router(integrate_router.router)
+api.include_router(orders_router.router)
 api.include_router(subscriptions_router.router)
 api.include_router(webhooks_router.router)
 app.include_router(api)
@@ -238,6 +241,9 @@ async def on_startup():
     await db.admin_users.create_index("email", unique=True)
     await db.admin_invites.create_index("token", unique=True)
     await db.admin_invites.create_index("email")
+    await db.orders.create_index("reference", unique=True)
+    await db.orders.create_index("status")
+    await db.orders.create_index("created_at")
     logger.info("WatchNexus Licensing Server ready")
 
 

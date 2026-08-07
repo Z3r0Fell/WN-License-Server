@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
 import {
   Home, Package, KeyRound, Users, FileBarChart2, Webhook,
-  Download, ShieldCheck, LogOut, ListChecks, Zap, Cog, UserCog, UserCircle2, CreditCard,
+  Download, ShieldCheck, LogOut, ListChecks, Zap, Cog, UserCog, UserCircle2, CreditCard, ShoppingCart,
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -15,6 +15,7 @@ const NAV = [
   { to: '/admin/quickstart',icon: Zap,          label: 'Quickstart',   testid: 'nav-admin-quickstart',   requires_admin: false },
   { to: '/admin/licenses',  icon: KeyRound,     label: 'Licenses',     testid: 'nav-admin-licenses',     requires_admin: false },
   { to: '/admin/subscriptions', icon: CreditCard, label: 'Subscriptions', testid: 'nav-admin-subscriptions', requires_admin: false },
+  { to: '/admin/orders',        icon: ShoppingCart, label: 'Orders',       testid: 'nav-admin-orders',       requires_admin: false },
   { to: '/admin/subscription-plans',icon: Package, label: 'Sub Plans', testid: 'nav-admin-sub-plans',   requires_admin: true  },
   { to: '/admin/products',  icon: Package,      label: 'Products',     testid: 'nav-admin-products',     requires_admin: false },
   { to: '/admin/customers', icon: Users,        label: 'Customers',    testid: 'nav-admin-customers',    requires_admin: false },

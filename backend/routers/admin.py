@@ -310,6 +310,11 @@ async def dashboard(admin=Depends(get_current_admin)):
     subs_canceled = await db.subscriptions.count_documents({"status": "canceled"})
     subs_total = await db.subscriptions.count_documents({})
     plans_total = await db.subscription_plans.count_documents({"status": "active"})
+    # Checkout orders
+    orders_pending = await db.orders.count_documents({"status": "pending_payment"})
+    orders_paid = await db.orders.count_documents({"status": "paid"})
+    orders_canceled = await db.orders.count_documents({"status": "canceled"})
+    orders_total = await db.orders.count_documents({})
     recent_acts = await db.activations.find({}, {"_id": 0}).sort("created_at", -1).limit(8).to_list(8)
     recent_audit = await db.audit_log.find({}, {"_id": 0}).sort("ts", -1).limit(8).to_list(8)
     recent_webhooks = await db.webhook_events.find({}, {"_id": 0}).sort("received_at", -1).limit(8).to_list(8)
@@ -326,6 +331,10 @@ async def dashboard(admin=Depends(get_current_admin)):
         "subscriptions_canceled": subs_canceled,
         "subscriptions_total": subs_total,
         "subscription_plans_total": plans_total,
+        "orders_total": orders_total,
+        "orders_pending": orders_pending,
+        "orders_paid": orders_paid,
+        "orders_canceled": orders_canceled,
         "recent_activations": serialize_doc(recent_acts),
         "recent_audit": serialize_doc(recent_audit),
         "recent_webhooks": serialize_doc(recent_webhooks),
