@@ -30,6 +30,7 @@ from routers import orders as orders_router
 from routers import public as public_router
 from routers import quickstart as quickstart_router
 from routers import subscriptions as subscriptions_router
+from routers import updates as updates_router
 from routers import webhooks_router
 import runtime_settings
 
@@ -113,6 +114,7 @@ api.include_router(customer_router.router)
 api.include_router(integrate_router.router)
 api.include_router(orders_router.router)
 api.include_router(subscriptions_router.router)
+api.include_router(updates_router.router)
 api.include_router(webhooks_router.router)
 app.include_router(api)
 
