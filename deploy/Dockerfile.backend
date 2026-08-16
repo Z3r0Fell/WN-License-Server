@@ -17,7 +17,8 @@ RUN pip install -r requirements.txt
 COPY backend/ ./
 
 RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser \
-    && chown -R appuser:appuser /app
+    && chown -R appuser:appuser /app \
+    && mkdir -p /app/keys && chown appuser:appuser /app/keys
 USER appuser
 
 EXPOSE 8001
