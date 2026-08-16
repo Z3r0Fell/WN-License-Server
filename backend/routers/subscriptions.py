@@ -7,7 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr, Field
 
-from auth import get_current_admin, get_current_customer, require_admin_role
+from auth import get_current_admin, get_current_customer, require_admin_role, _client_ip
 from audit import log as audit_log
 from db import db, now_iso, serialize_doc
 
@@ -75,7 +75,7 @@ async def plans_create(body: SubscriptionPlanIn, request: Request,
     await db.subscription_plans.insert_one(doc)
     await audit_log("admin", admin["id"], admin["email"], "subscription_plan.create",
                     "subscription_plan", doc["id"], meta={"slug": body.slug},
-                    ip=request.client.host if request.client else None)
+                    ip=_client_ip(request))
     return serialize_doc(doc)
 
 
@@ -197,7 +197,7 @@ async def subscription_cancel(sid: str, body: SubscriptionCancelIn,
                     "subscription", sid, severity="warning",
                     meta={"at_period_end": body.at_period_end,
                           "reason": body.reason},
-                    ip=request.client.host if request.client else None)
+                    ip=_client_ip(request))
     fresh = await db.subscriptions.find_one({"id": sid}, {"_id": 0})
     return serialize_doc(fresh)
 
@@ -223,7 +223,7 @@ async def subscription_reactivate(sid: str, request: Request,
     await db.subscriptions.update_one({"id": sid}, {"$set": update})
     await audit_log("admin", admin["id"], admin["email"], "subscription.reactivate",
                     "subscription", sid, severity="info",
-                    ip=request.client.host if request.client else None)
+                    ip=_client_ip(request))
     fresh = await db.subscriptions.find_one({"id": sid}, {"_id": 0})
     return serialize_doc(fresh)
 
@@ -264,7 +264,7 @@ async def subscription_change_plan(sid: str, body: SubscriptionChangePlanIn,
                     meta={"from_plan": sub.get("plan_slug"),
                           "to_plan": new_plan["slug"],
                           "billing_period": body.billing_period},
-                    ip=request.client.host if request.client else None)
+                    ip=_client_ip(request))
     fresh = await db.subscriptions.find_one({"id": sid}, {"_id": 0})
     return serialize_doc(fresh)
 
@@ -310,7 +310,7 @@ async def subscription_add_license(sid: str, body: SubscriptionAddLicenseIn,
     await audit_log("admin", admin["id"], admin["email"], "subscription.add_license",
                     "license", license_id, severity="info",
                     meta={"subscription_id": sid, "seats": body.seats},
-                    ip=request.client.host if request.client else None)
+                    ip=_client_ip(request))
     return serialize_doc(doc)
 
 

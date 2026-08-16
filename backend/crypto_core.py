@@ -90,21 +90,27 @@ def _load_rsa_keys():
     global _rsa_private_cache, _rsa_public_cache
     if _rsa_private_cache and _rsa_public_cache:
         return _rsa_private_cache, _rsa_public_cache
-    priv_path = Path(os.environ.get("RSA_PRIVATE_KEY_PATH", "/app/backend/keys/license_rsa_private.pem"))
-    pub_path = Path(os.environ.get("RSA_PUBLIC_KEY_PATH", "/app/backend/keys/license_rsa_public.pem"))
+    priv_path = Path(os.environ.get("RSA_PRIVATE_KEY_PATH", "/app/keys/license_rsa_private.pem"))
+    pub_path = Path(os.environ.get("RSA_PUBLIC_KEY_PATH", "/app/keys/license_rsa_public.pem"))
     if not priv_path.exists() or not pub_path.exists():
         priv = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         priv_path.parent.mkdir(parents=True, exist_ok=True)
+        password = os.environ.get("RSA_PRIVATE_KEY_PASSWORD")
+        if password:
+            encryption = serialization.BestAvailableEncryption(password.encode())
+        else:
+            encryption = serialization.NoEncryption()
         priv_path.write_bytes(priv.private_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption(),
+            encryption_algorithm=encryption,
         ))
         pub_path.write_bytes(priv.public_key().public_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
         ))
-    priv = serialization.load_pem_private_key(priv_path.read_bytes(), password=None)
+    password = os.environ.get("RSA_PRIVATE_KEY_PASSWORD")
+    priv = serialization.load_pem_private_key(priv_path.read_bytes(), password=password.encode() if password else None)
     pub = serialization.load_pem_public_key(pub_path.read_bytes())
     _rsa_private_cache, _rsa_public_cache = priv, pub
     return priv, pub
@@ -154,7 +160,10 @@ ACTIVATION_TOKEN_GRACE = 60 * 60 * 24 * 7  # +7d offline grace
 
 
 def _jwt_secret() -> str:
-    return os.environ.get("JWT_SECRET", "dev-secret-please-change")
+    secret = os.environ.get("JWT_SECRET", "")
+    if not secret or len(secret) < 32:
+        raise RuntimeError("JWT_SECRET must be set and at least 32 characters long")
+    return secret
 
 
 def issue_activation_token(license_id: str, fingerprint: str, activation_id: str,
@@ -194,7 +203,7 @@ def validate_activation_token(token: str, expected_fp: Optional[str] = None) -> 
 
 # ---- Fingerprint ----
 def compute_fingerprint(mode: str, hw_id: Optional[str] = None,
-                       domain: Optional[str] = None) -> str:
+                        domain: Optional[str] = None) -> str:
     parts = []
     if mode in ("hw", "both") and hw_id:
         parts.append(f"hw:{hw_id}")

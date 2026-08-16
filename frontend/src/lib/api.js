@@ -9,34 +9,34 @@ const ADMIN_USER_KEY = 'wnx_admin_user';
 const CUSTOMER_USER_KEY = 'wnx_customer_user';
 
 export const adminAuth = {
-  getToken: () => localStorage.getItem(ADMIN_TOKEN_KEY),
+  getToken: () => sessionStorage.getItem(ADMIN_TOKEN_KEY),
   setSession: (token, user) => {
-    localStorage.setItem(ADMIN_TOKEN_KEY, token);
-    localStorage.setItem(ADMIN_USER_KEY, JSON.stringify(user));
+    sessionStorage.setItem(ADMIN_TOKEN_KEY, token);
+    sessionStorage.setItem(ADMIN_USER_KEY, JSON.stringify(user));
   },
   getUser: () => {
-    const raw = localStorage.getItem(ADMIN_USER_KEY);
+    const raw = sessionStorage.getItem(ADMIN_USER_KEY);
     return raw ? JSON.parse(raw) : null;
   },
   clear: () => {
-    localStorage.removeItem(ADMIN_TOKEN_KEY);
-    localStorage.removeItem(ADMIN_USER_KEY);
+    sessionStorage.removeItem(ADMIN_TOKEN_KEY);
+    sessionStorage.removeItem(ADMIN_USER_KEY);
   },
 };
 
 export const customerAuth = {
-  getToken: () => localStorage.getItem(CUSTOMER_TOKEN_KEY),
+  getToken: () => sessionStorage.getItem(CUSTOMER_TOKEN_KEY),
   setSession: (token, user) => {
-    localStorage.setItem(CUSTOMER_TOKEN_KEY, token);
-    localStorage.setItem(CUSTOMER_USER_KEY, JSON.stringify(user));
+    sessionStorage.setItem(CUSTOMER_TOKEN_KEY, token);
+    sessionStorage.setItem(CUSTOMER_USER_KEY, JSON.stringify(user));
   },
   getUser: () => {
-    const raw = localStorage.getItem(CUSTOMER_USER_KEY);
+    const raw = sessionStorage.getItem(CUSTOMER_USER_KEY);
     return raw ? JSON.parse(raw) : null;
   },
   clear: () => {
-    localStorage.removeItem(CUSTOMER_TOKEN_KEY);
-    localStorage.removeItem(CUSTOMER_USER_KEY);
+    sessionStorage.removeItem(CUSTOMER_TOKEN_KEY);
+    sessionStorage.removeItem(CUSTOMER_USER_KEY);
   },
 };
 

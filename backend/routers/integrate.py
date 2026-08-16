@@ -1,21 +1,28 @@
 """Server-to-server integrator endpoints (used by your product/app).
 Protected by X-API-Key. Rate limited."""
+import hashlib
 import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr, Field
 
-from auth import get_api_key
+from auth import get_api_key, _client_ip
 from audit import log as audit_log
 from crypto_core import (compute_fingerprint, get_rsa_public_pem,
                          issue_activation_token, validate_activation_token)
 from db import db, now_iso, serialize_doc
 
 from routers.admin import _create_license
-from routers.subscriptions import resolve_subscription_status
 
 router = APIRouter(prefix="/integrate", tags=["integrate"])
+
+
+def _require_scope(api_key: dict, required_scope: str):
+    scopes = api_key.get("scopes") or []
+    if required_scope not in scopes:
+        raise HTTPException(status_code=403,
+                            detail=f"API key missing required scope: {required_scope}")
 
 
 class ActivateIn(BaseModel):
@@ -39,7 +46,6 @@ class DeactivateIn(BaseModel):
 
 
 class MintIn(BaseModel):
-    """Website -> license server: mint a serial after a successful purchase."""
     customer_email: EmailStr
     product_id: Optional[str] = None
     product_slug: Optional[str] = None
@@ -50,17 +56,10 @@ class MintIn(BaseModel):
 
 
 async def _resolve_license(key: str) -> dict | None:
-    """Load the DB record for a license key. Keys are validated by presence —
-    they are unguessable short serials (no embedded signature). Lookup is
-    case-insensitive (base32); stored keys are always uppercase."""
     key = (key or "").strip().upper()
     if not key:
         return None
     return await db.licenses.find_one({"key": key}, {"_id": 0})
-
-
-def _client_ip(request: Request) -> str | None:
-    return request.client.host if request.client else None
 
 
 @router.post("/activate")
@@ -71,14 +70,13 @@ async def activate(body: ActivateIn, request: Request, api_key=Depends(get_api_k
     if lic["status"] != "active":
         raise HTTPException(403, f"License is {lic['status']}")
 
-    # Subscription check
     if lic.get("subscription_id"):
         sub = await db.subscriptions.find_one({"id": lic["subscription_id"]}, {"_id": 0})
         if sub:
+            from routers.subscriptions import resolve_subscription_status
             sub = await resolve_subscription_status(sub)
             if sub["status"] != "active":
                 raise HTTPException(403, f"Subscription is {sub['status']}")
-            # Sync license expiry with subscription period
             if sub.get("current_period_end") and sub["current_period_end"] != lic.get("expires_at"):
                 await db.licenses.update_one(
                     {"id": lic["id"]},
@@ -86,7 +84,6 @@ async def activate(body: ActivateIn, request: Request, api_key=Depends(get_api_k
                 lic["expires_at"] = sub["current_period_end"]
 
     if lic.get("expires_at"):
-        # if expires_at < now then expire it
         from datetime import datetime, timezone
         try:
             exp_dt = datetime.fromisoformat(lic["expires_at"].replace("Z", "+00:00"))
@@ -95,12 +92,11 @@ async def activate(body: ActivateIn, request: Request, api_key=Depends(get_api_k
             if exp_dt < datetime.now(timezone.utc):
                 await db.licenses.update_one({"id": lic["id"]}, {"$set": {"status": "expired"}})
                 raise HTTPException(403, "License is expired")
-        except ValueError:
-            pass
+        except (ValueError, TypeError):
+            raise HTTPException(400, f"Invalid expires_at format: {lic['expires_at']}")
 
     fp = compute_fingerprint(lic["fingerprint_mode"], body.hardware_id, body.domain)
 
-    # Existing activation? Same fingerprint => reuse.
     existing = await db.activations.find_one(
         {"license_id": lic["id"], "fingerprint": fp, "status": "active"}, {"_id": 0})
     if existing:
@@ -117,13 +113,6 @@ async def activate(body: ActivateIn, request: Request, api_key=Depends(get_api_k
             "reused": True,
         }
 
-    # Seat check
-    active_count = await db.activations.count_documents(
-        {"license_id": lic["id"], "status": "active"})
-    if active_count >= lic["seats"]:
-        raise HTTPException(403, f"Seat limit reached ({lic['seats']}). Deactivate a device first.")
-
-    # Create new
     aid = str(uuid.uuid4())
     doc = {
         "id": aid,
@@ -140,7 +129,27 @@ async def activate(body: ActivateIn, request: Request, api_key=Depends(get_api_k
         "first_ip": _client_ip(request),
         "last_ip": _client_ip(request),
     }
-    await db.activations.insert_one(doc)
+    # Reclaim a deactivated slot when one exists (keeps row count bounded).
+    res = await db.activations.find_one_and_update(
+        {"license_id": lic["id"], "status": {"$ne": "active"}},
+        {"$set": doc},
+        return_document=True,
+        projection={"_id": 0},
+    )
+    if not res:
+        # No free slot to reclaim: enforce the seat cap, then insert fresh.
+        active_count = await db.activations.count_documents(
+            {"license_id": lic["id"], "status": "active"})
+        if active_count >= lic["seats"]:
+            raise HTTPException(403, f"Seat limit reached ({lic['seats']}). Deactivate a device first.")
+        try:
+            await db.activations.insert_one(doc)
+        except Exception:
+            # Lost a race with a concurrent activation: re-check the seat cap.
+            active_count = await db.activations.count_documents(
+                {"license_id": lic["id"], "status": "active"})
+            if active_count > lic["seats"]:
+                raise HTTPException(403, f"Seat limit reached ({lic['seats']}). Deactivate a device first.")
     token = issue_activation_token(lic["id"], fp, aid)
     await audit_log("integrator", api_key.get("id"), api_key.get("name"),
                     "activation.create", "activation", aid,
@@ -158,6 +167,7 @@ async def activate(body: ActivateIn, request: Request, api_key=Depends(get_api_k
 
 @router.post("/validate")
 async def validate(body: ValidateIn, request: Request, api_key=Depends(get_api_key)):
+    _require_scope(api_key, "validate")
     decoded = validate_activation_token(body.activation_token)
     if not decoded["valid"]:
         return {"valid": False, "mode": decoded["mode"], "reason": decoded.get("reason")}
@@ -168,10 +178,10 @@ async def validate(body: ValidateIn, request: Request, api_key=Depends(get_api_k
     if lic["status"] != "active":
         return {"valid": False, "mode": f"license_{lic['status']}"}
 
-    # Subscription check
     if lic.get("subscription_id"):
         sub = await db.subscriptions.find_one({"id": lic["subscription_id"]}, {"_id": 0})
         if sub:
+            from routers.subscriptions import resolve_subscription_status
             sub = await resolve_subscription_status(sub)
             if sub["status"] != "active":
                 return {"valid": False, "mode": f"subscription_{sub['status']}"}
@@ -179,7 +189,6 @@ async def validate(body: ValidateIn, request: Request, api_key=Depends(get_api_k
     activation = await db.activations.find_one({"id": claims.get("aid")}, {"_id": 0})
     if not activation or activation["status"] != "active":
         return {"valid": False, "mode": "activation_revoked"}
-    # Re-compute fingerprint if client provided ids
     if body.hardware_id or body.domain:
         new_fp = compute_fingerprint(lic["fingerprint_mode"], body.hardware_id, body.domain)
         if new_fp != claims.get("fp"):
@@ -200,6 +209,7 @@ async def validate(body: ValidateIn, request: Request, api_key=Depends(get_api_k
 
 @router.post("/deactivate")
 async def deactivate(body: DeactivateIn, request: Request, api_key=Depends(get_api_key)):
+    _require_scope(api_key, "deactivate")
     activation_id = None
     if body.activation_token:
         d = validate_activation_token(body.activation_token)
@@ -230,8 +240,7 @@ async def deactivate(body: DeactivateIn, request: Request, api_key=Depends(get_a
 
 @router.post("/mint")
 async def mint(body: MintIn, request: Request, api_key=Depends(get_api_key)):
-    """Server-to-server: mint a license serial for a completed website purchase
-    and email it to the buyer. Use either product_id or product_slug."""
+    _require_scope(api_key, "mint")
     product = None
     if body.product_id:
         product = await db.products.find_one({"id": body.product_id}, {"_id": 0})
@@ -258,5 +267,4 @@ async def mint(body: MintIn, request: Request, api_key=Depends(get_api_key)):
 
 @router.get("/rsa-public-key")
 async def public_key():
-    """Public RSA key for offline license verification by clients."""
     return {"pem": get_rsa_public_pem()}

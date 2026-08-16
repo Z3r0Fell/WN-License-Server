@@ -171,7 +171,7 @@ upsert() {
 }
 
 # Only generate fresh secrets if the placeholders are still in place.
-if grep -q '^JWT_SECRET=change-me' "$ENV_FILE" || ! grep -qE '^JWT_SECRET=.{20}' "$ENV_FILE"; then
+if grep -q '^JWT_SECRET=change-me' "$ENV_FILE" || ! grep -qE '^JWT_SECRET=.{32}' "$ENV_FILE"; then
   upsert JWT_SECRET "$jwt"
 fi
 if grep -q '^HMAC_LICENSE_SECRET=change-me' "$ENV_FILE" || ! grep -qE '^HMAC_LICENSE_SECRET=.{20}' "$ENV_FILE"; then

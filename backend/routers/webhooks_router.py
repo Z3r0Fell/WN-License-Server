@@ -50,7 +50,8 @@ async def _provision_subscription(email: str | None, product_slug_hint: str | No
                                    provider_sub_id: str | None = None,
                                    billing_period: str = "monthly",
                                    price: float = 0,
-                                   currency: str = "USD") -> str | None:
+                                   currency: str = "USD",
+                                   expected_amount_cents: int | None = None) -> str | None:
     """Create or update a subscription from a webhook event."""
     if not email:
         return None
@@ -62,7 +63,6 @@ async def _provision_subscription(email: str | None, product_slug_hint: str | No
     if not product:
         return None
 
-    # Find matching subscription plan by slug or create a dynamic one
     plan_slug = f"{source}-{plan}"
     sub_plan = await db.subscription_plans.find_one({"slug": plan_slug}, {"_id": 0})
     if not sub_plan:
@@ -88,14 +88,12 @@ async def _provision_subscription(email: str | None, product_slug_hint: str | No
 
     customer = await db.customers.find_one({"email": email.lower()}, {"_id": 0})
 
-    # Check for existing subscription by provider sub id
     existing = None
     if provider_sub_id:
         existing = await db.subscriptions.find_one(
             {"payment_provider_subscription_id": provider_sub_id}, {"_id": 0})
 
     if existing:
-        # Renew: extend period, keep active
         from datetime import datetime, timezone, timedelta
         now = datetime.now(timezone.utc)
         period_map = {"monthly": 30, "yearly": 365, "quarterly": 90}
@@ -117,7 +115,6 @@ async def _provision_subscription(email: str | None, product_slug_hint: str | No
                         meta={"source": source, "provider_sub_id": provider_sub_id})
         return existing["id"]
 
-    # Create new subscription
     sid = str(uuid.uuid4())
     from datetime import datetime, timezone, timedelta
     now = datetime.now(timezone.utc)
@@ -158,7 +155,6 @@ async def _provision_subscription(email: str | None, product_slug_hint: str | No
                           "email": email, "billing_period": billing_period,
                           "price": price})
 
-    # Auto-provision a license for the subscription
     from crypto_core import generate_license_key
     license_id = str(uuid.uuid4())
     key = generate_license_key(sub_plan.get("slug", "standard"))
@@ -186,7 +182,6 @@ async def _provision_subscription(email: str | None, product_slug_hint: str | No
                     "license", license_id,
                     meta={"subscription_id": sid, "product": product["slug"]})
 
-    # Fire-and-forget email
     try:
         portal_url = (runtime_settings.get("CUSTOMER_PORTAL_URL")
                       or runtime_settings.get("APP_PUBLIC_URL").rstrip("/") + "/portal")
@@ -349,6 +344,13 @@ async def stripe(request: Request):
                                        provider_event_id=provider_event_id,
                                        error=f"order_ref {order_ref} not found")
                     return {"ok": False, "error": "order not found"}
+                amount_total = obj.get("amount_total") or obj.get("amount")
+                expected_cents = int(round(float(order.get("price_cad", 0)) * 100))
+                if amount_total and int(amount_total) != expected_cents:
+                    await _store_event("stripe", event_type, "error", body, payload,
+                                       provider_event_id=provider_event_id,
+                                       error=f"amount_mismatch: got {amount_total}, expected {expected_cents}")
+                    return {"ok": False, "error": "amount_mismatch"}
                 try:
                     fulfilled = await _fulfill_order(
                         order, notes="Paid via Stripe", actor_email="stripe:webhook")

@@ -1,5 +1,6 @@
 """Admin routes: login, products, licenses, activations, customers, audit, api keys, builds, webhooks list, dashboard."""
 import csv
+import hashlib
 import io
 import os
 import secrets
@@ -12,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from pydantic import BaseModel, EmailStr, Field
 
 from auth import (get_current_admin, hash_password, verify_password,
-                  require_admin_role, issue_session_token)
+                  require_admin_role, issue_session_token, _client_ip)
 from audit import log as audit_log
 from crypto_core import (compute_fingerprint, generate_license_key,
                          get_rsa_public_pem)
@@ -35,19 +36,9 @@ class AdminLoginIn(BaseModel):
 MFA_CHALLENGE_TTL_SECONDS = 5 * 60
 
 
-def _client_ip(request: Request) -> Optional[str]:
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        return xff.split(",")[0].strip()
-    real = request.headers.get("x-real-ip")
-    if real:
-        return real.strip()
-    return request.client.host if request.client else None
-
-
 def _issue_mfa_challenge(user_id: str) -> str:
+    from auth import _secret
     now = int(time.time())
-    secret = os.environ.get("JWT_SECRET", "dev-secret")
     return _jwt.encode(
         {
             "sub": user_id,
@@ -56,15 +47,15 @@ def _issue_mfa_challenge(user_id: str) -> str:
             "exp": now + MFA_CHALLENGE_TTL_SECONDS,
             "iss": "watchnexus-mfa",
         },
-        secret,
+        _secret(),
         algorithm="HS256",
     )
 
 
 def _decode_mfa_challenge(token: str) -> Optional[str]:
-    secret = os.environ.get("JWT_SECRET", "dev-secret")
+    from auth import _secret
     try:
-        claims = _jwt.decode(token, secret, algorithms=["HS256"],
+        claims = _jwt.decode(token, _secret(), algorithms=["HS256"],
                              issuer="watchnexus-mfa")
         if claims.get("purpose") != "mfa-challenge":
             return None
@@ -76,7 +67,6 @@ def _decode_mfa_challenge(token: str) -> Optional[str]:
 @router.post("/login")
 async def admin_login(body: AdminLoginIn, request: Request):
     ip = _client_ip(request)
-    # IP allowlist (admin-only restriction; webhook/customer routes unaffected).
     if not mfa.admin_login_ip_allowed(ip):
         await audit_log("admin", None, body.email.lower(), "admin.login_ip_blocked",
                         severity="warning", ip=ip,
@@ -238,7 +228,7 @@ async def me_2fa_verify(body: Verify2FAIn, request: Request,
     )
     await audit_log("admin", admin["id"], admin["email"], "admin_user.2fa_enabled",
                     "admin_user", admin["id"], severity="warning",
-                    ip=request.client.host if request.client else None)
+                    ip=_client_ip(request))
     return {"ok": True, "recovery_codes": recovery}
 
 
@@ -267,7 +257,7 @@ async def me_2fa_disable(body: Disable2FAIn, request: Request,
     )
     await audit_log("admin", admin["id"], admin["email"], "admin_user.2fa_disabled",
                     "admin_user", admin["id"], severity="warning",
-                    ip=request.client.host if request.client else None)
+                    ip=_client_ip(request))
     return {"ok": True}
 
 
@@ -290,7 +280,7 @@ async def me_2fa_regenerate(body: Disable2FAIn, request: Request,
     await audit_log("admin", admin["id"], admin["email"],
                     "admin_user.2fa_recovery_regenerated", "admin_user", admin["id"],
                     severity="warning",
-                    ip=request.client.host if request.client else None)
+                    ip=_client_ip(request))
     return {"ok": True, "recovery_codes": recovery}
 
 
@@ -369,7 +359,7 @@ async def products_create(body: ProductIn, request: Request, admin=Depends(requi
     await db.products.insert_one(doc)
     await audit_log("admin", admin["id"], admin["email"], "product.create",
                     "product", doc["id"], meta={"slug": body.slug},
-                    ip=request.client.host if request.client else None)
+                    ip=_client_ip(request))
     return serialize_doc(doc)
 
 
@@ -493,7 +483,7 @@ async def licenses_create(body: LicenseIn, request: Request, admin=Depends(requi
                                 body.seats, body.expires_at, body.notes, source="admin")
     await audit_log("admin", admin["id"], admin["email"], "license.create",
                     "license", doc["id"], meta={"product": doc["product_slug"]},
-                    ip=request.client.host if request.client else None)
+                    ip=_client_ip(request))
     return serialize_doc(doc)
 
 
@@ -650,6 +640,7 @@ async def api_keys_create(body: ApiKeyIn, admin=Depends(require_admin_role("admi
         "scopes": body.scopes,
         "allowed_ips": body.allowed_ips or [],
         "key": raw,
+        "key_hash": hashlib.sha256(raw.encode()).hexdigest(),
         "status": "active",
         "created_at": now_iso(),
         "last_used_at": None,
@@ -825,7 +816,7 @@ async def settings_update(body: SettingsUpdate, request: Request,
     await audit_log("admin", admin["id"], admin["email"], "settings.update",
                     severity="warning",
                     meta={"keys": sorted(list(accepted.keys()))},
-                    ip=request.client.host if request.client else None)
+                    ip=_client_ip(request))
     return runtime_settings.public_view()
 
 

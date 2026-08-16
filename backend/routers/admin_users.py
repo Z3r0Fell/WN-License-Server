@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr, Field
 
 from auth import (get_current_admin, hash_password, verify_password,
-                  require_admin_role, issue_session_token)
+                  require_admin_role, issue_session_token, _client_ip)
 from audit import log as audit_log
 from db import db, now_iso, serialize_doc
 import runtime_settings as rs
@@ -49,7 +49,7 @@ async def change_my_password(body: ChangePasswordIn, request: Request,
     )
     await audit_log("admin", admin["id"], admin["email"], "admin_user.change_own_password",
                     "admin_user", admin["id"], severity="warning",
-                    ip=request.client.host if request.client else None)
+                    ip=_client_ip(request))
     return {"ok": True}
 
 
@@ -111,7 +111,7 @@ async def create_user(body: CreateUserIn, request: Request,
     await audit_log("admin", admin["id"], admin["email"], "admin_user.create",
                     "admin_user", doc["id"], severity="warning",
                     meta={"email": email, "role": body.admin_role},
-                    ip=request.client.host if request.client else None)
+                    ip=_client_ip(request))
     return _public_user(doc)
 
 
@@ -131,7 +131,6 @@ async def update_user(uid: str, body: UpdateUserIn, request: Request,
     if not target:
         raise HTTPException(404, "User not found")
 
-    # Guards: don't lock yourself out, and don't demote/disable the last admin.
     if target["id"] == admin["id"]:
         if "admin_role" in payload and payload["admin_role"] != ROLE_ADMIN:
             raise HTTPException(400, "You cannot demote your own role")
@@ -140,7 +139,6 @@ async def update_user(uid: str, body: UpdateUserIn, request: Request,
 
     if (payload.get("admin_role") == ROLE_SUPPORT or payload.get("is_active") is False) \
             and target.get("admin_role") == ROLE_ADMIN:
-        # Make sure at least one OTHER active admin would remain.
         other_admins = await db.admin_users.count_documents({
             "id": {"$ne": uid},
             "admin_role": ROLE_ADMIN,
@@ -154,7 +152,7 @@ async def update_user(uid: str, body: UpdateUserIn, request: Request,
     fresh = await db.admin_users.find_one({"id": uid}, {"_id": 0})
     await audit_log("admin", admin["id"], admin["email"], "admin_user.update",
                     "admin_user", uid, severity="warning", meta=payload,
-                    ip=request.client.host if request.client else None)
+                    ip=_client_ip(request))
     return _public_user(fresh)
 
 
@@ -178,7 +176,7 @@ async def delete_user(uid: str, request: Request,
     await audit_log("admin", admin["id"], admin["email"], "admin_user.delete",
                     "admin_user", uid, severity="warning",
                     meta={"email": target.get("email")},
-                    ip=request.client.host if request.client else None)
+                    ip=_client_ip(request))
     return {"ok": True}
 
 
@@ -201,7 +199,7 @@ async def reset_password(uid: str, body: ResetPasswordIn, request: Request,
     await audit_log("admin", admin["id"], admin["email"], "admin_user.reset_password",
                     "admin_user", uid, severity="warning",
                     meta={"email": target.get("email")},
-                    ip=request.client.host if request.client else None)
+                    ip=_client_ip(request))
     return {"ok": True}
 
 
@@ -220,14 +218,14 @@ class InviteUserIn(BaseModel):
 def _build_invite_url(token: str) -> str:
     base = (rs.get("APP_PUBLIC_URL") or os.environ.get("APP_PUBLIC_URL") or "").rstrip("/")
     if not base:
-        base = ""  # caller can prepend their own
-    return f"{base}/admin/accept-invite?token={token}"
+        base = ""
+    return f"{base}/admin/accept-invite/{token}"
 
 
 @router.post("/users/invite")
 async def invite_user(body: InviteUserIn, request: Request,
                        admin=Depends(require_admin_role(ROLE_ADMIN))):
-    """Create an invite token and email a sign-up link. Requires SendGrid/SMTP configured."""
+    """Create an invite token and email a sign-up link."""
     email = body.email.lower()
     if await db.admin_users.find_one({"email": email}):
         raise HTTPException(400, "An admin with that email already exists")
@@ -250,7 +248,6 @@ async def invite_user(body: InviteUserIn, request: Request,
 
     invite_url = _build_invite_url(token)
 
-    # Send the invite email (best-effort - if email is unconfigured, surface the URL).
     sent = {"sent": False, "provider": None}
     try:
         from email_sender import send_email
@@ -277,9 +274,8 @@ async def invite_user(body: InviteUserIn, request: Request,
                     "admin_user", invite_doc["id"], severity="warning",
                     meta={"email": email, "role": body.admin_role,
                           "email_sent": sent.get("sent", False)},
-                    ip=request.client.host if request.client else None)
+                    ip=_client_ip(request))
 
-    # Always return the URL so the inviter can hand it over manually if email failed.
     return {
         "ok": True,
         "invite_id": invite_doc["id"],
@@ -316,7 +312,6 @@ public_router = APIRouter(prefix="/public", tags=["admin-users-public"])
 
 
 class InvitePreviewOut(BaseModel):
-    email: str
     name: Optional[str] = None
     admin_role: str
     expires_at: str
@@ -327,7 +322,6 @@ async def preview_invite(token: str):
     doc = await db.admin_invites.find_one({"token": token, "status": "pending"}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Invite not found or already used")
-    # Expiry check
     try:
         exp = datetime.fromisoformat(doc["expires_at"].replace("Z", "+00:00"))
         if datetime.now(timezone.utc) > exp:
@@ -335,7 +329,6 @@ async def preview_invite(token: str):
     except ValueError:
         pass
     return InvitePreviewOut(
-        email=doc["email"],
         name=doc.get("name"),
         admin_role=doc.get("admin_role", ROLE_ADMIN),
         expires_at=doc["expires_at"],
@@ -389,7 +382,7 @@ async def accept_invite(body: AcceptInviteIn, request: Request):
     )
     await audit_log("admin", user["id"], user["email"], "admin_user.invite_accept",
                     "admin_user", user["id"], severity="warning",
-                    ip=request.client.host if request.client else None)
+                    ip=_client_ip(request))
     return {
         "token": token,
         "user": {

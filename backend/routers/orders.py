@@ -10,6 +10,7 @@ This keeps the flow payment-provider-free today while leaving the order
 records in place so Stripe / PayPal can be layered in later behind the same
 mark-paid path (webhooks would just call the same fulfill function).
 """
+import re
 import secrets
 import uuid
 from typing import Optional
@@ -18,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr, Field
 
 from audit import log as audit_log
-from auth import get_current_admin, require_admin_role
+from auth import get_current_admin, require_admin_role, _client_ip
 from db import db, now_iso, serialize_doc
 import runtime_settings
 
@@ -28,11 +29,8 @@ admin_prefix = "/admin"
 ORDER_STATUSES = ("pending_payment", "paid", "canceled")
 
 
-def _client_ip(request: Request) -> Optional[str]:
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        return xff.split(",")[0].strip()
-    return request.client.host if request.client else None
+def _escape_regex(value: str) -> str:
+    return re.escape(value)
 
 
 def _plan_info(plan: str) -> Optional[dict]:
@@ -61,7 +59,7 @@ def _plan_info(plan: str) -> Optional[dict]:
 
 
 def _new_reference() -> str:
-    return "ORD-" + secrets.token_hex(5).upper()
+    return "ORD-" + secrets.token_hex(8).upper()
 
 
 def _payment_email() -> str:
@@ -159,11 +157,7 @@ async def orders_lookup(ref: str):
 
 @router.post("/orders/{ref}/stripe-checkout")
 async def order_stripe_checkout(ref: str, request: Request):
-    """Create a Stripe Checkout Session for an order and return its hosted URL.
-
-    The buyer is redirected to checkout.stripe.com; on success Stripe fires
-    `checkout.session.completed` to /api/webhooks/stripe, which matches the
-    order via metadata and calls the same fulfill path as manual mark-paid."""
+    """Create a Stripe Checkout Session for an order and return its hosted URL."""
     import requests
 
     secret = runtime_settings.get("STRIPE_SECRET_KEY")
@@ -227,10 +221,11 @@ async def orders_list(admin=Depends(get_current_admin),
             raise HTTPException(400, f"status must be one of {ORDER_STATUSES}")
         query["status"] = status
     if q:
+        escaped = _escape_regex(q)
         query["$or"] = [
-            {"reference": {"$regex": q, "$options": "i"}},
-            {"email": {"$regex": q, "$options": "i"}},
-            {"buyer_name": {"$regex": q, "$options": "i"}},
+            {"reference": {"$regex": escaped, "$options": "i"}},
+            {"email": {"$regex": escaped, "$options": "i"}},
+            {"buyer_name": {"$regex": escaped, "$options": "i"}},
         ]
     docs = await db.orders.find(query, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
     return serialize_doc(docs)
@@ -242,10 +237,7 @@ class OrderMarkPaidIn(BaseModel):
 
 async def _fulfill_order(order: dict, notes: Optional[str],
                          actor_email: str) -> dict:
-    """Shared fulfill path: issue the serial + email it, mark order paid.
-
-    Also used by future Stripe / PayPal webhooks so checkout and payment
-    providers converge on the same issuance logic."""
+    """Shared fulfill path: issue the serial + email it, mark order paid."""
     if order["status"] == "paid":
         return order
     if order["status"] != "pending_payment":

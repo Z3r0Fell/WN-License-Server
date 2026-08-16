@@ -7,12 +7,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# System deps for cryptography + tar (for backups).
-# NOTE: We intentionally do NOT install `mongodb-database-tools` here. The
-# MongoDB apt repo for Debian bookworm has been flaky during deploys (apt
-# exit 100). The backup script falls back to a pure-Python JSON export when
-# `mongodump` is unavailable, which is good enough for restore via
-# `mongorestore --drop` from the `mongo` container OR `mongoimport`.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential libssl-dev curl ca-certificates tar \
   && rm -rf /var/lib/apt/lists/*
@@ -21,6 +15,10 @@ COPY backend/requirements.txt ./requirements.txt
 RUN pip install -r requirements.txt
 
 COPY backend/ ./
+
+RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser \
+    && chown -R appuser:appuser /app
+USER appuser
 
 EXPOSE 8001
 

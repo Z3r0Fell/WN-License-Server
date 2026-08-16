@@ -25,6 +25,7 @@ import AdminProfile from './pages/AdminProfile';
 import AdminAcceptInvite from './pages/AdminAcceptInvite';
 import PortalLogin from './pages/PortalLogin';
 import PortalRegister from './pages/PortalRegister';
+import PortalVerifyEmail from './pages/PortalVerifyEmail';
 import PortalLayout from './components/PortalLayout';
 import PortalDashboard from './pages/PortalDashboard';
 import PortalDownloads from './pages/PortalDownloads';
@@ -85,6 +86,7 @@ function App() {
           {/* Customer portal */}
           <Route path="/portal/login" element={<PortalLogin />} />
           <Route path="/portal/register" element={<PortalRegister />} />
+          <Route path="/portal/verify-email" element={<PortalVerifyEmail />} />
           <Route path="/portal" element={<PortalLayout />}>
             <Route index element={<PortalDashboard />} />
             <Route path="downloads" element={<PortalDownloads />} />

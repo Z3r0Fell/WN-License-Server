@@ -7,6 +7,7 @@ The demo license is **per product** - so when an admin clicks `Quickstart`
 they can pick which product to test against, and a dedicated bootstrap
 demo license is lazily created under that product the first time.
 """
+import hashlib
 import os
 import secrets
 import uuid
@@ -15,7 +16,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from auth import get_current_admin
+from auth import get_current_admin, _client_ip
 from audit import log as audit_log
 from crypto_core import (compute_fingerprint, issue_activation_token,
                          validate_activation_token)
@@ -58,6 +59,7 @@ async def _ensure_bootstrap_key() -> dict:
         "scopes": ["activate", "validate", "deactivate"],
         "allowed_ips": [],
         "key": raw,
+        "key_hash": hashlib.sha256(raw.encode()).hexdigest(),
         "is_bootstrap": True,
         "status": "active",
         "created_at": now_iso(),
@@ -165,6 +167,7 @@ async def rotate_key(admin=Depends(get_current_admin)):
         "scopes": ["activate", "validate", "deactivate"],
         "allowed_ips": [],
         "key": raw,
+        "key_hash": hashlib.sha256(raw.encode()).hexdigest(),
         "is_bootstrap": True,
         "status": "active",
         "created_at": now_iso(),
@@ -236,8 +239,8 @@ async def test_run(body: TestRunIn, request: Request, admin=Depends(get_current_
         "status": "active",
         "created_at": now_iso(),
         "last_seen_at": now_iso(),
-        "first_ip": request.client.host if request.client else None,
-        "last_ip": request.client.host if request.client else None,
+        "first_ip": _client_ip(request),
+        "last_ip": _client_ip(request),
         "source": "quickstart_test",
     }
     await db.activations.insert_one(activation)
@@ -286,7 +289,7 @@ async def test_run(body: TestRunIn, request: Request, admin=Depends(get_current_
                     "license", lic["id"], severity="info",
                     meta={"product": lic["product_slug"], "steps": 3,
                           "fingerprint": fp[:16]},
-                    ip=request.client.host if request.client else None)
+                    ip=_client_ip(request))
 
     return {
         "ok": True,

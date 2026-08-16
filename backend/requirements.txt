@@ -5,25 +5,25 @@
 # from a dev container or you'll re-introduce hallucinated future versions.
 
 # --- web framework ---
-fastapi==0.110.1
-uvicorn[standard]==0.25.0
-starlette==0.37.2
-python-multipart==0.0.9
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+starlette==0.38.6
+python-multipart==0.0.12
 
 # --- data validation / typing ---
-pydantic==2.7.4
-pydantic-settings==2.3.4
+pydantic==2.10.4
+pydantic-settings==2.7.1
 email-validator==2.2.0
-typing-extensions>=4.10.0
+typing-extensions>=4.12.0
 
 # --- mongodb ---
-motor==3.4.0
-pymongo==4.7.3
+motor==3.6.0
+pymongo==4.9.2
 
 # --- auth / crypto ---
-PyJWT==2.8.0
-bcrypt==4.1.3
-cryptography==42.0.7
+PyJWT==2.9.0
+bcrypt==4.2.1
+cryptography==44.0.1
 
 # --- env / config ---
 python-dotenv==1.0.1

@@ -18,9 +18,13 @@ export default function PortalRegister() {
     setLoading(true);
     try {
       const r = await customerApi.post('/customer/register', form);
-      customerAuth.setSession(r.data.token, r.data.user);
-      toast.success('Account created');
-      navigate('/portal', { replace: true });
+      if (r.data.token) {
+        customerAuth.setSession(r.data.token, r.data.user);
+        toast.success('Account created');
+      } else {
+        toast.success('Account created. Check your inbox to verify your email.');
+      }
+      navigate(r.data.token ? '/portal' : '/portal/login', { replace: true });
     } catch (e) { toast.error(e?.response?.data?.detail || 'Registration failed'); }
     finally { setLoading(false); }
   };

@@ -1,4 +1,5 @@
 """Authentication helpers: password hashing, JWT issuance, dependencies."""
+import hashlib
 import os
 import time
 import uuid
@@ -9,11 +10,14 @@ import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from db import db, serialize_doc
+from db import db, now_iso, serialize_doc
 
 bearer = HTTPBearer(auto_error=False)
 
-SESSION_TTL = 60 * 60 * 24 * 7  # 7d
+SESSION_TTL = 60 * 60 * 24  # 24h
+REFRESH_TTL = 60 * 60 * 24 * 30  # 30d
+MAX_FAILED_ATTEMPTS = 5
+LOCKOUT_MINUTES = 15
 
 
 def hash_password(plain: str) -> str:
@@ -28,7 +32,10 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 def _secret() -> str:
-    return os.environ.get("JWT_SECRET", "dev-secret")
+    secret = os.environ.get("JWT_SECRET", "")
+    if not secret or len(secret) < 32:
+        raise RuntimeError("JWT_SECRET must be set and at least 32 characters long")
+    return secret
 
 
 def issue_session_token(subject_id: str, role: str, email: str) -> str:
@@ -41,6 +48,22 @@ def issue_session_token(subject_id: str, role: str, email: str) -> str:
         "exp": now + SESSION_TTL,
         "iss": "watchnexus-session",
         "jti": str(uuid.uuid4()),
+        "type": "access",
+    }
+    return jwt.encode(claims, _secret(), algorithm="HS256")
+
+
+def issue_refresh_token(subject_id: str, role: str, email: str) -> str:
+    now = int(time.time())
+    claims = {
+        "sub": subject_id,
+        "role": role,
+        "email": email,
+        "iat": now,
+        "exp": now + REFRESH_TTL,
+        "iss": "watchnexus-session",
+        "jti": str(uuid.uuid4()),
+        "type": "refresh",
     }
     return jwt.encode(claims, _secret(), algorithm="HS256")
 
@@ -52,6 +75,40 @@ def _decode(token: str) -> Optional[dict]:
         return None
 
 
+async def _check_lockout(collection: str, email: str, ip: str) -> Optional[int]:
+    now = int(time.time())
+    lockout_key = f"lockout:{collection}:{email.lower()}"
+    lock_ttl = LOCKOUT_MINUTES * 60
+    lock_until = await db.lockouts.find_one({"key": lockout_key})
+    if lock_until and lock_until.get("until", 0) > now:
+        return lock_until["until"] - now
+    await db.lockouts.delete_many({"key": lockout_key, "until": {"$lt": now}})
+    return None
+
+
+async def _record_failed_attempt(collection: str, email: str, ip: str) -> None:
+    now = int(time.time())
+    lock_ttl = LOCKOUT_MINUTES * 60
+    key = f"lockout:{collection}:{email.lower()}"
+    await db.lockouts.update_one(
+        {"key": key},
+        {"$inc": {"attempts": 1},
+         "$setOnInsert": {"until": now + lock_ttl, "created_at": now_iso()}},
+        upsert=True,
+    )
+    doc = await db.lockouts.find_one({"key": key})
+    if doc and doc.get("attempts", 0) >= MAX_FAILED_ATTEMPTS:
+        await db.lockouts.update_one(
+            {"key": key},
+            {"$set": {"until": now + lock_ttl, "attempts": MAX_FAILED_ATTEMPTS}},
+        )
+
+
+async def _clear_failed_attempts(collection: str, email: str) -> None:
+    key = f"lockout:{collection}:{email.lower()}"
+    await db.lockouts.delete_one({"key": key})
+
+
 async def get_current_admin(
     creds: Optional[HTTPAuthorizationCredentials] = Depends(bearer),
 ) -> dict:
@@ -60,27 +117,18 @@ async def get_current_admin(
     claims = _decode(creds.credentials)
     if not claims or claims.get("role") != "admin":
         raise HTTPException(status_code=401, detail="Invalid admin token")
+    if claims.get("type") != "access":
+        raise HTTPException(status_code=401, detail="Invalid token type")
     user = await db.admin_users.find_one({"id": claims["sub"]}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=401, detail="Admin not found")
-    # Block disabled accounts even if they still hold a valid JWT.
     if user.get("is_active") is False:
         raise HTTPException(status_code=403, detail="Account disabled")
-    # Ensure legacy users without a role still get the admin role for compatibility.
     user.setdefault("admin_role", "admin")
     return serialize_doc(user)
 
 
 def require_admin_role(*allowed_roles: str):
-    """Dependency factory: gate an endpoint by admin_role.
-
-    Usage:
-        @router.post(..., dependencies=[Depends(require_admin_role("admin"))])
-
-    Or to receive the user object:
-        async def my_handler(admin=Depends(get_current_admin)):
-            require_admin_role("admin")(admin)
-    """
     allowed = set(allowed_roles)
 
     async def _dep(admin: dict = Depends(get_current_admin)) -> dict:
@@ -103,6 +151,8 @@ async def get_current_customer(
     claims = _decode(creds.credentials)
     if not claims or claims.get("role") != "customer":
         raise HTTPException(status_code=401, detail="Invalid customer token")
+    if claims.get("type") != "access":
+        raise HTTPException(status_code=401, detail="Invalid token type")
     user = await db.customers.find_one({"id": claims["sub"]}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=401, detail="Customer not found")
@@ -111,35 +161,32 @@ async def get_current_customer(
 
 async def get_api_key(request: Request) -> dict:
     """Server-to-server API key auth for /integrate/*. Header: X-API-Key.
-    Enforces per-key IP allowlist (CIDR aware)."""
+    Enforces per-key IP allowlist (CIDR aware) and scopes."""
     raw = request.headers.get("x-api-key") or request.headers.get("X-API-Key")
     if not raw:
         raise HTTPException(status_code=401, detail="Missing X-API-Key")
-    rec = await db.api_keys.find_one({"key": raw, "status": "active"}, {"_id": 0})
+    key_hash = hashlib.sha256(raw.encode()).hexdigest()
+    rec = await db.api_keys.find_one({"key_hash": key_hash, "status": "active"}, {"_id": 0})
     if not rec:
         raise HTTPException(status_code=401, detail="Invalid API key")
-    # IP allowlist
     from webhooks_sig import ip_in_allowlist
     client_ip = _client_ip(request)
     allowlist = rec.get("allowed_ips") or []
     if allowlist and not ip_in_allowlist(client_ip, allowlist):
         raise HTTPException(status_code=403,
                             detail=f"IP {client_ip} not allowed for this API key")
-    # update last_used (fire and forget)
-    from db import now_iso
     await db.api_keys.update_one({"id": rec["id"]},
                                  {"$set": {"last_used_at": now_iso(),
                                            "last_used_ip": client_ip}})
     return serialize_doc(rec)
 
 
-def _client_ip(request: Request) -> str | None:
+def _client_ip(request: Request) -> str:
     """Return the real client IP, honoring common proxy headers."""
-    # X-Forwarded-For: client, proxy1, proxy2 -> take the first
     xff = request.headers.get("x-forwarded-for") or request.headers.get("X-Forwarded-For")
     if xff:
         return xff.split(",")[0].strip()
     real = request.headers.get("x-real-ip") or request.headers.get("X-Real-IP")
     if real:
         return real.strip()
-    return request.client.host if request.client else None
+    return request.client.host if request.client else "unknown"

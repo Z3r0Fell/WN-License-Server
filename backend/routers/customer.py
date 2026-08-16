@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr
 
 from auth import (get_current_customer, hash_password, issue_session_token,
-                  verify_password)
+                  verify_password, _client_ip)
 from audit import log as audit_log
 from db import db, now_iso, serialize_doc
 
@@ -30,31 +30,73 @@ async def register(body: RegisterIn, request: Request):
     existing = await db.customers.find_one({"email": body.email.lower()})
     if existing:
         raise HTTPException(400, "Email already registered")
+    
+    verification_token = str(uuid.uuid4())
     doc = {
         "id": str(uuid.uuid4()),
         "email": body.email.lower(),
         "name": body.name or body.email.split("@")[0],
         "password_hash": hash_password(body.password),
         "created_at": now_iso(),
+        "email_verified": False,
+        "email_verification_token": verification_token,
     }
     await db.customers.insert_one(doc)
-    # Link any existing licenses purchased before registration
-    await db.licenses.update_many({"customer_email": doc["email"], "customer_id": None},
-                                  {"$set": {"customer_id": doc["id"]}})
-    token = issue_session_token(doc["id"], "customer", doc["email"])
+    
+    try:
+        from email_sender import send_email
+        import runtime_settings as rs
+        portal = (rs.get("CUSTOMER_PORTAL_URL")
+                  or rs.get("APP_PUBLIC_URL", "https://licenses.watchnexus.ca")).rstrip("/")
+        verify_url = f"{portal}/portal/verify-email?token={verification_token}"
+        html = f"""
+        <p>Hello {doc['name']},</p>
+        <p>Thanks for registering. Please verify your email by clicking the link below:</p>
+        <p><a href="{verify_url}">Verify Email</a></p>
+        <p>If you didn't create this account, you can ignore this email.</p>
+        """
+        send_email(body.email, "Verify your email", html)
+    except Exception:
+        import logging
+        logging.getLogger("watchnexus").exception("customer verification email failed")
+    
     await audit_log("customer", doc["id"], doc["email"], "customer.register",
-                    ip=request.client.host if request.client else None)
-    return {"token": token, "user": {"id": doc["id"], "email": doc["email"], "name": doc["name"]}}
+                    ip=_client_ip(request))
+    return {"token": None, "user": {"id": doc["id"], "email": doc["email"], "name": doc["name"], "email_verified": False}}
+
+
+@router.post("/verify-email")
+async def verify_email(body: dict):
+    token = body.get("token")
+    if not token:
+        raise HTTPException(400, "Missing token")
+    user = await db.customers.find_one({"email_verification_token": token}, {"_id": 0})
+    if not user:
+        raise HTTPException(404, "Invalid or expired verification token")
+    await db.customers.update_one(
+        {"id": user["id"]},
+        {"$set": {"email_verified": True, "email_verification_token": None}},
+    )
+    return {"ok": True}
 
 
 @router.post("/login")
 async def login(body: LoginIn, request: Request):
+    from auth import _check_lockout, _record_failed_attempt, _clear_failed_attempts, _client_ip
+    ip = _client_ip(request)
+    lockout = await _check_lockout("customers", body.email.lower(), ip)
+    if lockout:
+        raise HTTPException(403, f"Account locked. Try again in {lockout} seconds")
     user = await db.customers.find_one({"email": body.email.lower()}, {"_id": 0})
     if not user or not verify_password(body.password, user["password_hash"]):
+        await _record_failed_attempt("customers", body.email.lower(), ip)
         raise HTTPException(401, "Invalid credentials")
+    await _clear_failed_attempts("customers", body.email.lower())
+    if not user.get("email_verified"):
+        raise HTTPException(403, "Email not verified. Check your inbox for the verification link.")
     token = issue_session_token(user["id"], "customer", user["email"])
     await audit_log("customer", user["id"], user["email"], "customer.login",
-                    ip=request.client.host if request.client else None)
+                    ip=ip)
     return {"token": token, "user": {"id": user["id"], "email": user["email"], "name": user.get("name")}}
 
 
