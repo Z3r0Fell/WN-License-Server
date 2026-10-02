@@ -79,10 +79,16 @@ async def _check_lockout(collection: str, email: str, ip: str) -> Optional[int]:
     now = int(time.time())
     lockout_key = f"lockout:{collection}:{email.lower()}"
     lock_ttl = LOCKOUT_MINUTES * 60
-    lock_until = await db.lockouts.find_one({"key": lockout_key})
-    if lock_until and lock_until.get("until", 0) > now:
-        return lock_until["until"] - now
-    await db.lockouts.delete_many({"key": lockout_key, "until": {"$lt": now}})
+    doc = await db.lockouts.find_one({"key": lockout_key})
+    if not doc:
+        return None
+    # Locked only once the attempt threshold is hit — a single typo must not
+    # lock the account (and must not let anyone lock a victim out with one try).
+    if doc.get("attempts", 0) >= MAX_FAILED_ATTEMPTS and doc.get("until", 0) > now:
+        return doc["until"] - now
+    # Counting window (or lock) has lapsed: start fresh.
+    if max(doc.get("until", 0), doc.get("window_until", 0)) < now:
+        await db.lockouts.delete_one({"key": lockout_key})
     return None
 
 
@@ -93,7 +99,7 @@ async def _record_failed_attempt(collection: str, email: str, ip: str) -> None:
     await db.lockouts.update_one(
         {"key": key},
         {"$inc": {"attempts": 1},
-         "$setOnInsert": {"until": now + lock_ttl, "created_at": now_iso()}},
+         "$setOnInsert": {"window_until": now + lock_ttl, "created_at": now_iso()}},
         upsert=True,
     )
     doc = await db.lockouts.find_one({"key": key})
@@ -182,11 +188,20 @@ async def get_api_key(request: Request) -> dict:
 
 
 def _client_ip(request: Request) -> str:
-    """Return the real client IP, honoring common proxy headers."""
-    xff = request.headers.get("x-forwarded-for") or request.headers.get("X-Forwarded-For")
-    if xff:
-        return xff.split(",")[0].strip()
-    real = request.headers.get("x-real-ip") or request.headers.get("X-Real-IP")
-    if real:
-        return real.strip()
-    return request.client.host if request.client else "unknown"
+    """Return the real client IP.
+
+    The backend is only reachable through our nginx edge, which sets
+    X-Real-IP to $remote_addr and *appends* to X-Forwarded-For. The left-most
+    X-Forwarded-For entry is therefore client-controlled and must never be
+    trusted (it would bypass API-key/admin IP allowlists and rate limits).
+    X-Real-IP is honoured only when the direct peer is on a private network
+    (i.e. the request came through our proxy, not straight from the internet).
+    """
+    import ipaddress
+    peer = request.client.host if request.client else "unknown"
+    try:
+        peer_is_proxy = ipaddress.ip_address(peer).is_private
+    except ValueError:
+        peer_is_proxy = False
+    real = request.headers.get("x-real-ip") if peer_is_proxy else None
+    return real.strip() if real else peer

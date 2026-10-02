@@ -26,7 +26,7 @@ import runtime_settings
 router = APIRouter(tags=["orders"])
 admin_prefix = "/admin"
 
-ORDER_STATUSES = ("pending_payment", "paid", "canceled")
+ORDER_STATUSES = ("pending_payment", "fulfilling", "paid", "canceled")
 
 
 def _escape_regex(value: str) -> str:
@@ -237,29 +237,45 @@ class OrderMarkPaidIn(BaseModel):
 
 async def _fulfill_order(order: dict, notes: Optional[str],
                          actor_email: str) -> dict:
-    """Shared fulfill path: issue the serial + email it, mark order paid."""
-    if order["status"] == "paid":
-        return order
-    if order["status"] != "pending_payment":
-        raise HTTPException(400, f"Order is {order['status']} - cannot mark paid")
+    """Shared fulfill path: issue the serial + email it, mark order paid.
+
+    Admin mark-paid and the Stripe webhook can race (or an admin can
+    double-click), so the order is atomically claimed first: only the caller
+    that flips pending_payment -> fulfilling issues a license."""
+    claimed = await db.orders.find_one_and_update(
+        {"id": order["id"], "status": "pending_payment"},
+        {"$set": {"status": "fulfilling", "updated_at": now_iso()}},
+        projection={"_id": 0},
+    )
+    if not claimed:
+        current = await db.orders.find_one({"id": order["id"]}, {"_id": 0}) or order
+        if current["status"] in ("paid", "fulfilling"):
+            return current
+        raise HTTPException(400, f"Order is {current['status']} - cannot mark paid")
 
     from routers.admin import _create_license
 
-    product = await db.products.find_one({"slug": order["product_slug"]}, {"_id": 0})
-    if not product:
-        product = await db.products.find_one({}, {"_id": 0}, sort=[("created_at", 1)])
-    if not product:
-        raise HTTPException(400, "No product configured to issue a license against")
+    try:
+        product = await db.products.find_one({"slug": order["product_slug"]}, {"_id": 0})
+        if not product:
+            product = await db.products.find_one({}, {"_id": 0}, sort=[("created_at", 1)])
+        if not product:
+            raise HTTPException(400, "No product configured to issue a license against")
 
-    lic = await _create_license(
-        product_id=product["id"],
-        customer_email=order["email"],
-        plan=order["plan"],
-        seats=order.get("seats", 1),
-        expires_at=None,
-        notes=notes or order.get("notes"),
-        source="checkout",
-    )
+        lic = await _create_license(
+            product_id=product["id"],
+            customer_email=order["email"],
+            plan=order["plan"],
+            seats=order.get("seats", 1),
+            expires_at=None,
+            notes=notes or order.get("notes"),
+            source="checkout",
+        )
+    except Exception:
+        # Release the claim so the order can be retried.
+        await db.orders.update_one({"id": order["id"], "status": "fulfilling"},
+                                   {"$set": {"status": "pending_payment"}})
+        raise
     update = {
         "status": "paid",
         "paid_at": now_iso(),
@@ -300,7 +316,7 @@ async def order_cancel(oid: str, request: Request,
     order = await db.orders.find_one({"id": oid}, {"_id": 0})
     if not order:
         raise HTTPException(404, "Order not found")
-    if order["status"] == "paid":
+    if order["status"] in ("paid", "fulfilling"):
         raise HTTPException(400, "Cannot cancel a paid order - revoke the license instead")
     if order["status"] == "canceled":
         return {"ok": True, "already_canceled": True}

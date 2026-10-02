@@ -148,7 +148,14 @@ async def _provision_subscription(email: str | None, product_slug_hint: str | No
         "created_at": now_iso(),
         "updated_at": now_iso(),
     }
-    await db.subscriptions.insert_one(doc)
+    from pymongo.errors import DuplicateKeyError
+    try:
+        await db.subscriptions.insert_one(doc)
+    except DuplicateKeyError:
+        # A concurrent event for the same Stripe subscription won the insert.
+        dup = await db.subscriptions.find_one(
+            {"payment_provider_subscription_id": provider_sub_id}, {"_id": 0})
+        return dup["id"] if dup else None
     await audit_log("webhook", None, None, "subscription.created",
                     "subscription", sid,
                     meta={"source": source, "product": product["slug"],
@@ -305,8 +312,12 @@ async def stripe(request: Request):
     ):
         email = extract_email_stripe(payload)
         obj = payload.get("data", {}).get("object", {}) or {}
-        meta = obj.get("metadata") or {}
+        meta = dict(obj.get("subscription_details", {}).get("metadata") or {})
+        meta.update(obj.get("metadata") or {})
         product_slug = meta.get("product_slug")
+        # Tier comes from our own checkout metadata (pro/ultra). Without it a
+        # license would silently map to the free Standard tier in WatchNexus.
+        plan = (meta.get("plan") or "").strip().lower()
 
         is_subscription_event = event_type == "customer.subscription.created" or \
             (event_type == "checkout.session.completed" and obj.get("mode") == "subscription") or \
@@ -330,9 +341,25 @@ async def stripe(request: Request):
                 amount = first.get("amount", 0) or 0
                 price = float(amount) / 100
             subscription_id = await _provision_subscription(
-                email, product_slug, plan="stripe", source="stripe",
+                email, product_slug, plan=plan or "standard", source="stripe",
                 provider_sub_id=provider_sub_id, billing_period=billing_period,
                 price=price, currency="USD")
+        elif event_type not in ("checkout.session.completed",
+                                "checkout.session.async_payment_succeeded"):
+            # One-time purchases are fulfilled from the Checkout Session only.
+            # Stripe also emits payment_intent.succeeded / invoice.paid for the
+            # same payment; those carry no order metadata and used to mint a
+            # second (Standard) serial for the buyer.
+            await _store_event("stripe", event_type, "ignored", body, payload,
+                               provider_event_id=provider_event_id)
+            return {"ok": True, "ignored": True}
+        elif obj.get("payment_status") not in (None, "paid", "no_payment_required"):
+            # Async methods (e.g. bank debits) complete later via
+            # checkout.session.async_payment_succeeded.
+            await _store_event("stripe", event_type, "ignored", body, payload,
+                               provider_event_id=provider_event_id,
+                               error=f"payment_status={obj.get('payment_status')}")
+            return {"ok": True, "ignored": True}
         else:
             order_ref = meta.get("order_ref")
             if order_ref:
@@ -360,8 +387,13 @@ async def stripe(request: Request):
                                        provider_event_id=provider_event_id,
                                        error=f"fulfill failed: {e.detail}")
                     return {"ok": False, "error": e.detail}
+            elif plan in ("pro", "ultra"):
+                license_id = await _provision_license(email, product_slug, plan=plan, source="stripe")
             else:
-                license_id = await _provision_license(email, product_slug, plan="stripe", source="stripe")
+                await _store_event("stripe", event_type, "error", body, payload,
+                                   provider_event_id=provider_event_id,
+                                   error="no order_ref or plan metadata - cannot determine tier")
+                return {"ok": False, "error": "missing order_ref/plan metadata"}
     await _store_event("stripe", event_type, "processed", body, payload,
                        provider_event_id=provider_event_id, license_id=license_id)
     return {"ok": True, "license_id": license_id, "subscription_id": subscription_id}

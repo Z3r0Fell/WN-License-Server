@@ -62,8 +62,24 @@ async def _resolve_license(key: str) -> dict | None:
     return await db.licenses.find_one({"key": key}, {"_id": 0})
 
 
+def plan_to_tier(plan: str | None) -> str:
+    """Canonical tier for a plan name (mirrors the WNX-<TIER> serial prefix)."""
+    p = (plan or "").lower()
+    if "ult" in p:
+        return "ultra"
+    if "pro" in p:
+        return "pro"
+    return "standard"
+
+
+def _license_view(lic: dict) -> dict:
+    return {"id": lic["id"], "plan": lic["plan"], "tier": plan_to_tier(lic["plan"]),
+            "product": lic["product_slug"]}
+
+
 @router.post("/activate")
 async def activate(body: ActivateIn, request: Request, api_key=Depends(get_api_key)):
+    _require_scope(api_key, "activate")
     lic = await _resolve_license(body.license_key)
     if not lic:
         raise HTTPException(400, "Invalid license key")
@@ -109,7 +125,7 @@ async def activate(body: ActivateIn, request: Request, api_key=Depends(get_api_k
             "activation_token": token["token"],
             "expires_at": token["exp"],
             "grace_until": token["grace_until"],
-            "license": {"id": lic["id"], "plan": lic["plan"], "product": lic["product_slug"]},
+            "license": _license_view(lic),
             "reused": True,
         }
 
@@ -129,6 +145,12 @@ async def activate(body: ActivateIn, request: Request, api_key=Depends(get_api_k
         "first_ip": _client_ip(request),
         "last_ip": _client_ip(request),
     }
+    seat_msg = f"Seat limit reached ({lic['seats']}). Deactivate a device first."
+    active_q = {"license_id": lic["id"], "status": "active"}
+    # Enforce the cap on both paths — reclaiming a deactivated row must not
+    # bypass it (e.g. after an admin lowers a license's seat count).
+    if await db.activations.count_documents(active_q) >= lic["seats"]:
+        raise HTTPException(403, seat_msg)
     # Reclaim a deactivated slot when one exists (keeps row count bounded).
     res = await db.activations.find_one_and_update(
         {"license_id": lic["id"], "status": {"$ne": "active"}},
@@ -137,19 +159,14 @@ async def activate(body: ActivateIn, request: Request, api_key=Depends(get_api_k
         projection={"_id": 0},
     )
     if not res:
-        # No free slot to reclaim: enforce the seat cap, then insert fresh.
-        active_count = await db.activations.count_documents(
-            {"license_id": lic["id"], "status": "active"})
-        if active_count >= lic["seats"]:
-            raise HTTPException(403, f"Seat limit reached ({lic['seats']}). Deactivate a device first.")
-        try:
-            await db.activations.insert_one(doc)
-        except Exception:
-            # Lost a race with a concurrent activation: re-check the seat cap.
-            active_count = await db.activations.count_documents(
-                {"license_id": lic["id"], "status": "active"})
-            if active_count > lic["seats"]:
-                raise HTTPException(403, f"Seat limit reached ({lic['seats']}). Deactivate a device first.")
+        await db.activations.insert_one(doc)
+    # Concurrent activations can both pass the pre-check: verify after the
+    # write and roll ours back if we pushed the license over its seat cap.
+    if await db.activations.count_documents(active_q) > lic["seats"]:
+        await db.activations.update_one(
+            {"id": aid}, {"$set": {"status": "deactivated", "deactivated_at": now_iso(),
+                                   "deactivated_reason": "seat_limit_race"}})
+        raise HTTPException(403, seat_msg)
     token = issue_activation_token(lic["id"], fp, aid)
     await audit_log("integrator", api_key.get("id"), api_key.get("name"),
                     "activation.create", "activation", aid,
@@ -160,7 +177,7 @@ async def activate(body: ActivateIn, request: Request, api_key=Depends(get_api_k
         "activation_token": token["token"],
         "expires_at": token["exp"],
         "grace_until": token["grace_until"],
-        "license": {"id": lic["id"], "plan": lic["plan"], "product": lic["product_slug"]},
+        "license": _license_view(lic),
         "reused": False,
     }
 
@@ -199,7 +216,7 @@ async def validate(body: ValidateIn, request: Request, api_key=Depends(get_api_k
     return {
         "valid": True,
         "mode": decoded["mode"],
-        "license": {"id": lic["id"], "plan": lic["plan"], "product": lic["product_slug"],
+        "license": {**_license_view(lic),
                     "expires_at": lic.get("expires_at"), "seats": lic["seats"]},
         "activation": {"id": activation["id"], "device_name": activation.get("device_name")},
         "expires_at": claims.get("exp"),

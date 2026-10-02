@@ -200,6 +200,14 @@ async def on_startup():
     await db.orders.create_index("reference", unique=True)
     await db.orders.create_index("status")
     await db.orders.create_index("created_at")
+    try:
+        # Stripe fires several events per signup; this makes them converge on
+        # one subscription. Guarded so pre-existing duplicates can't block boot.
+        await db.subscriptions.create_index(
+            "payment_provider_subscription_id", unique=True,
+            partialFilterExpression={"payment_provider_subscription_id": {"$type": "string"}})
+    except Exception as e:
+        logger.warning("subscriptions provider-id unique index not created: %s", e)
     await db.lockouts.create_index("key", unique=True)
     await db.lockouts.create_index("until")
     await _ensure_ttl_index(db.audit_log, "ts", 2592000)
