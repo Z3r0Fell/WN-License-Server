@@ -59,7 +59,7 @@ def start_wn(volume, api_key):
     r = sh("docker", "run", "-d", "--name", "wn-e2e", "--network", LS_NET, "-p", f"{WN_PORT}:8001",
            "-v", f"{volume}:/app/data", "-e", "WATCHNEXUS_DATA_DIR=/app/data",
            "-e", f"JWT_SECRET={JWT}", "-e", f"LICENSE_SERVER_URL={LS_INTERNAL}",
-           "-e", f"LICENSE_SERVER_API_KEY={api_key}",
+           *(["-e", f"LICENSE_SERVER_API_KEY={api_key}"] if api_key else []),
            "-e", f"WATCHNEXUS_SEED_ADMIN_EMAIL={WN_ADMIN[0]}",
            "-e", f"WATCHNEXUS_SEED_ADMIN_PASSWORD={WN_ADMIN[1]}", WN_IMAGE)
     assert r.returncode == 0, r.stderr
@@ -88,7 +88,10 @@ JWT = secrets.token_hex(32)
 
 def main():
     adm = ls_admin()
-    api_key = requests.get(f"{LS}/api/admin/quickstart", headers=adm, timeout=15).json()["api_key"]
+    # WN_USE_BUILTIN_KEY=1: rely on the client key baked into the image
+    # (official-image behaviour) instead of passing an operator key.
+    api_key = None if os.environ.get("WN_USE_BUILTIN_KEY") == "1" else \
+        requests.get(f"{LS}/api/admin/quickstart", headers=adm, timeout=15).json()["api_key"]
     run = uuid.uuid4().hex[:8]
     vol = f"wn-e2e-{run}"
     pro = buy("pro", f"wn-pro-{run}@example.com", adm)
